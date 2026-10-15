@@ -69,6 +69,19 @@ public class GeofenceController {
         }).orElse(ResponseEntity.notFound().build());
     }
 
+    @DeleteMapping
+    public ResponseEntity<Void> deleteAllZones() {
+        long count = noFlyZoneRepository.count();
+        noFlyZoneRepository.deleteAll();
+        telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
+                "INFO",
+                "Airspace Cleared",
+                "All " + count + " restricted No-Fly Zones have been decommissioned and removed",
+                null, null
+        ));
+        return ResponseEntity.noContent().build();
+    }
+
     @PutMapping("/{id}/toggle")
     public ResponseEntity<NoFlyZone> toggleNoFlyZone(@PathVariable Long id) {
         return noFlyZoneRepository.findById(id).map(zone -> {

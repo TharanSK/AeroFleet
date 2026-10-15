@@ -116,9 +116,9 @@
                     <i data-lucide="shield-alert" class="w-4 h-4 text-rose-400"></i>
                     Add No-Fly Zone
                 </button>
-                <button id="btn-trigger-storm" class="bg-slate-900/90 hover:bg-amber-900/80 text-amber-300 border border-amber-800/80 shadow-lg backdrop-blur-md px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition">
-                    <i data-lucide="cloud-lightning" class="w-4 h-4"></i>
-                    Inject Storm
+                <button id="btn-open-remove-zone-modal" class="bg-slate-900/90 hover:bg-slate-800 text-rose-300 hover:text-white border border-rose-900/80 shadow-lg backdrop-blur-md px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition">
+                    <i data-lucide="trash-2" class="w-4 h-4 text-rose-400"></i>
+                    Remove Zone
                 </button>
             </div>
 
@@ -323,6 +323,34 @@
                     <button type="submit" class="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold transition">Establish Zone</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal: Remove No-Fly Zone -->
+    <div id="remove-zone-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-xl p-6 shadow-2xl space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h2 class="text-base font-bold text-white flex items-center gap-2">
+                    <i data-lucide="trash-2" class="w-4 h-4 text-rose-400"></i> Decommission Restricted Airspace
+                </h2>
+                <button id="btn-close-remove-zone-modal" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="space-y-3 text-xs">
+                <p class="text-slate-400">Select any restricted zone below to remove it from the simulation grid, or click <strong>Clear All Zones</strong> to wipe all restrictions.</p>
+                <div id="remove-zone-list" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    <!-- Dynamic Zone Items -->
+                </div>
+                <div class="flex justify-between items-center pt-3 border-t border-slate-800">
+                    <button type="button" id="btn-clear-all-zones" class="px-3 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-semibold transition">
+                        Clear All Zones
+                    </button>
+                    <button type="button" id="btn-cancel-remove-zone-modal" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
+                        Close
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 

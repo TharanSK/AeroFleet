@@ -462,18 +462,30 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('mouse-coords').textContent = `Grid: (X: ${gx}, Y: ${gy})`;
     });
 
-    // Click on Blank Slate Grid to Dispatch Order or Place Zone
+    // Click on Blank Slate Grid to Dispatch Order, Place Zone, or Remove Zone
     canvas.addEventListener('click', (e) => {
         const rect = canvas.getBoundingClientRect();
         const gx = toGridX(e.clientX - rect.left);
         const gy = toGridY(e.clientY - rect.top);
 
+        // 1. If Add Zone modal is open, fill coordinates
         if (zoneModal && !zoneModal.classList.contains('hidden')) {
             document.getElementById('zone-x').value = gx;
             document.getElementById('zone-y').value = gy;
             return;
         }
 
+        // 2. If user clicked on an existing zone, open Remove Zone dialog
+        const clickedZone = noFlyZones.find(z => {
+            const dist = Math.sqrt((gx - z.centerX) ** 2 + (gy - z.centerY) ** 2);
+            return dist <= z.radius;
+        });
+        if (clickedZone) {
+            openRemoveZoneModal(clickedZone.id);
+            return;
+        }
+
+        // 3. Otherwise dispatch order
         document.getElementById('cust-x').value = gx;
         document.getElementById('cust-y').value = gy;
         openModal();
@@ -662,15 +674,6 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshOrders();
     };
 
-    document.getElementById('btn-trigger-storm').onclick = async () => {
-        document.getElementById('weather-select').value = 'STORM';
-        await fetch('/api/v1/simulation/control', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ weatherCondition: 'STORM' })
-        });
-    };
-
     document.getElementById('btn-clear-logs').onclick = () => {
         document.getElementById('log-feed').innerHTML = '';
     };
@@ -681,6 +684,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/v1/geofence');
             noFlyZones = await res.json();
             renderZonesTab();
+            if (removeZoneModal && !removeZoneModal.classList.contains('hidden')) {
+                renderRemoveZoneModal();
+            }
         } catch (e) {
             console.error('Error refreshing zones', e);
         }
@@ -729,8 +735,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="btn-toggle-zone px-2.5 py-1 rounded ${z.active ? 'bg-amber-950/60 text-amber-300 border-amber-800/80 hover:bg-amber-900' : 'bg-emerald-950/60 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900'} border transition" data-id="${z.id}">
                         ${z.active ? 'Deactivate' : 'Activate'}
                     </button>
-                    <button class="btn-delete-zone px-2.5 py-1 rounded bg-slate-800 text-rose-400 hover:bg-rose-950 hover:text-rose-200 border border-slate-700 transition" data-id="${z.id}">
-                        Delete
+                    <button class="btn-delete-zone px-2.5 py-1 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-800/80 transition flex items-center gap-1" data-id="${z.id}">
+                        <i data-lucide="trash-2" class="w-3 h-3"></i> Remove
                     </button>
                 </div>
             `;
@@ -848,6 +854,85 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok) {
                 closeZoneModal();
                 refreshZones();
+            }
+        };
+    }
+
+    // Modal: Remove No-Fly Zone
+    const removeZoneModal = document.getElementById('remove-zone-modal');
+    function openRemoveZoneModal(highlightId) {
+        if (removeZoneModal) {
+            removeZoneModal.classList.remove('hidden');
+            renderRemoveZoneModal(highlightId);
+            lucide.createIcons();
+        }
+    }
+    function closeRemoveZoneModal() {
+        if (removeZoneModal) removeZoneModal.classList.add('hidden');
+    }
+
+    const btnOpenRemoveZoneModal = document.getElementById('btn-open-remove-zone-modal');
+    if (btnOpenRemoveZoneModal) btnOpenRemoveZoneModal.onclick = () => openRemoveZoneModal();
+    const btnCloseRemoveZoneModal = document.getElementById('btn-close-remove-zone-modal');
+    if (btnCloseRemoveZoneModal) btnCloseRemoveZoneModal.onclick = closeRemoveZoneModal;
+    const btnCancelRemoveZoneModal = document.getElementById('btn-cancel-remove-zone-modal');
+    if (btnCancelRemoveZoneModal) btnCancelRemoveZoneModal.onclick = closeRemoveZoneModal;
+
+    function renderRemoveZoneModal(highlightId) {
+        const listContainer = document.getElementById('remove-zone-list');
+        if (!listContainer) return;
+        listContainer.innerHTML = '';
+
+        if (!noFlyZones || noFlyZones.length === 0) {
+            listContainer.innerHTML = '<div class="text-center py-6 text-slate-500 text-xs">No active or inactive restricted zones exist.</div>';
+            return;
+        }
+
+        noFlyZones.forEach(z => {
+            const isTarget = highlightId && z.id === highlightId;
+            const item = document.createElement('div');
+            item.className = 'p-3 rounded-lg bg-slate-950 border ' + 
+                (isTarget ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800') + 
+                ' flex justify-between items-center transition';
+
+            item.innerHTML = `
+                <div class="space-y-0.5">
+                    <div class="font-bold text-slate-200 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full ${z.active ? 'bg-rose-500' : 'bg-slate-600'}"></span>
+                        <span>${z.name}</span>
+                        ${isTarget ? '<span class="text-[9px] px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800">SELECTED</span>' : ''}
+                    </div>
+                    <div class="text-slate-400 text-[10px] font-mono">
+                        Center: (${Math.round(z.centerX)}, ${Math.round(z.centerY)}) | Radius: ${Math.round(z.radius)}u
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <button class="btn-remove-single-zone px-2.5 py-1 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-800 text-xs font-semibold flex items-center gap-1 transition" data-id="${z.id}">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Remove
+                    </button>
+                </div>
+            `;
+            listContainer.appendChild(item);
+        });
+
+        document.querySelectorAll('.btn-remove-single-zone').forEach(btn => {
+            btn.onclick = async () => {
+                await fetch(`/api/v1/geofence/${btn.dataset.id}`, { method: 'DELETE' });
+                await refreshZones();
+                renderRemoveZoneModal();
+            };
+        });
+
+        lucide.createIcons();
+    }
+
+    const btnClearAllZones = document.getElementById('btn-clear-all-zones');
+    if (btnClearAllZones) {
+        btnClearAllZones.onclick = async () => {
+            if (confirm('Are you sure you want to decommission and remove all restricted zones?')) {
+                await fetch('/api/v1/geofence', { method: 'DELETE' });
+                await refreshZones();
+                closeRemoveZoneModal();
             }
         };
     }
