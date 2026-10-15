@@ -13,6 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -43,21 +45,20 @@ public class DispatchService {
     }
 
     /**
-     * Scans FIFO order queue and assigns pending orders to available drones.
+     * Matches pending orders directly to the provided live in-memory drones.
      */
     @Transactional
-    public synchronized int dispatchPendingOrders() {
+    public synchronized int dispatchPendingOrders(Collection<Drone> candidateDrones) {
         List<DeliveryOrder> pendingOrders = orderRepository.findByStatusOrderByCreatedAtAsc(OrderStatus.PENDING);
-        if (pendingOrders.isEmpty()) {
+        if (pendingOrders.isEmpty() || candidateDrones == null || candidateDrones.isEmpty()) {
             return 0;
         }
 
-        List<Drone> allDrones = droneRepository.findAll();
         List<Depot> allDepots = depotRepository.findAll();
         int dispatchedCount = 0;
 
         for (DeliveryOrder order : pendingOrders) {
-            Optional<Drone> bestDroneOpt = findOptimalDrone(order, allDrones, allDepots);
+            Optional<Drone> bestDroneOpt = findOptimalDrone(order, candidateDrones, allDepots);
 
             if (bestDroneOpt.isPresent()) {
                 Drone drone = bestDroneOpt.get();
@@ -70,26 +71,31 @@ public class DispatchService {
                 List<Waypoint> route = routingService.buildDeliveryRoute(drone, depot, order);
 
                 drone.setWaypoints(route);
-                drone.setStatus(DroneStatus.ASSIGNED);
+                drone.setStatus(DroneStatus.EN_ROUTE_DELIVERY);
                 drone.setCurrentPayloadKg(order.getPackageWeightKg());
                 drone.setAssignedOrderId(order.getId());
 
-                order.setStatus(OrderStatus.ASSIGNED);
+                order.setStatus(OrderStatus.IN_TRANSIT);
                 order.setAssignedDroneId(drone.getId());
                 order.setOriginDepotId(depot.getId());
 
                 droneRepository.save(drone);
                 orderRepository.save(order);
 
-                log.info("Dispatched Order [{}] ({}) to Drone [{}] at Depot [{}]",
-                        order.getOrderNumber(), order.getCustomerName(), drone.getCallsign(), depot.getName());
+                log.info("Dispatched Order [{}] ({}) to Drone [{}] at Depot [{}] with {} waypoints",
+                        order.getOrderNumber(), order.getCustomerName(), drone.getCallsign(), depot.getName(), route.size());
                 dispatchedCount++;
             }
         }
         return dispatchedCount;
     }
 
-    private Optional<Drone> findOptimalDrone(DeliveryOrder order, List<Drone> drones, List<Depot> depots) {
+    @Transactional
+    public synchronized int dispatchPendingOrders() {
+        return dispatchPendingOrders(droneRepository.findAll());
+    }
+
+    private Optional<Drone> findOptimalDrone(DeliveryOrder order, Collection<Drone> drones, List<Depot> depots) {
         return drones.stream()
                 .filter(d -> d.getStatus() == DroneStatus.IDLE ||
                             (d.getStatus() == DroneStatus.CHARGING && d.getBatteryPercent() >= 70.0))

@@ -22,9 +22,12 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -50,7 +53,7 @@ public class SimulationEngine {
     private final WeatherService weatherService;
     private final TelemetryBroadcaster telemetryBroadcaster;
 
-    // Thread-safe in-memory cache for live drones
+    // Thread-safe in-memory cache for live drones with runtime flight plans
     private final ConcurrentHashMap<Long, Drone> runtimeDrones = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -86,9 +89,15 @@ public class SimulationEngine {
 
     @PostConstruct
     public void init() {
-        syncRuntimeDronesFromDb();
         scheduler.scheduleAtFixedRate(this::tick, 1000, tickIntervalMs, TimeUnit.MILLISECONDS);
-        log.info("AeroFleet 2D Grid Simulation Engine started at {}ms tick interval", tickIntervalMs);
+        log.info("AeroFleet 2D Grid Simulation Engine scheduled at {}ms tick interval", tickIntervalMs);
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void onApplicationReady() {
+        syncRuntimeDronesFromDb();
+        log.info("AeroFleet Engine ready: loaded {} drones into runtime memory", runtimeDrones.size());
+        triggerDispatch();
     }
 
     @PreDestroy
@@ -103,6 +112,20 @@ public class SimulationEngine {
         }
     }
 
+    public synchronized void triggerDispatch() {
+        if (runtimeDrones.isEmpty()) {
+            syncRuntimeDronesFromDb();
+        }
+        dispatchService.dispatchPendingOrders(runtimeDrones.values());
+    }
+
+    public Collection<Drone> getRuntimeDrones() {
+        if (runtimeDrones.isEmpty()) {
+            syncRuntimeDronesFromDb();
+        }
+        return runtimeDrones.values();
+    }
+
     /**
      * Fixed-rate discrete tick loop.
      */
@@ -113,25 +136,15 @@ public class SimulationEngine {
                 return;
             }
 
+            if (runtimeDrones.isEmpty()) {
+                syncRuntimeDronesFromDb();
+            }
+
             double deltaSeconds = 1.0 * speedMultiplier;
             simTimeElapsedSeconds += (long) deltaSeconds;
 
-            // 1. Dispatch pending orders
-            dispatchService.dispatchPendingOrders();
-
-            // Refresh runtime state if new assignments occurred
-            List<Drone> dbDrones = droneRepository.findAll();
-            for (Drone dbDrone : dbDrones) {
-                Drone runtimeDrone = runtimeDrones.get(dbDrone.getId());
-                if (runtimeDrone == null) {
-                    runtimeDrones.put(dbDrone.getId(), dbDrone);
-                } else if (runtimeDrone.getAssignedOrderId() == null && dbDrone.getAssignedOrderId() != null) {
-                    runtimeDrone.setAssignedOrderId(dbDrone.getAssignedOrderId());
-                    runtimeDrone.setCurrentPayloadKg(dbDrone.getCurrentPayloadKg());
-                    runtimeDrone.setStatus(dbDrone.getStatus());
-                    runtimeDrone.setWaypoints(dbDrone.getWaypoints());
-                }
-            }
+            // 1. Dispatch pending orders directly to in-memory runtime drones
+            dispatchService.dispatchPendingOrders(runtimeDrones.values());
 
             // 2. Advance 2D coordinates & battery for each drone
             for (Drone drone : runtimeDrones.values()) {
@@ -175,6 +188,9 @@ public class SimulationEngine {
             if (status == DroneStatus.LANDING || status == DroneStatus.RETURNING) {
                 drone.setStatus(DroneStatus.CHARGING);
                 drone.setSpeed(0.0);
+            } else {
+                drone.setStatus(DroneStatus.IDLE);
+                drone.setSpeed(0.0);
             }
             return;
         }
@@ -187,7 +203,7 @@ public class SimulationEngine {
         double stepDistance = targetSpeed * deltaSeconds;
 
         // Waypoint arrival check
-        if (distanceToTarget <= Math.max(stepDistance, 5.0) || targetSpeed == 0.0) {
+        if (distanceToTarget <= Math.max(stepDistance, 8.0) || targetSpeed == 0.0) {
             handleWaypointArrival(drone, targetWaypoint);
         } else {
             // Move along 2D vector towards target

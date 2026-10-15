@@ -5,6 +5,8 @@ import com.aerofleet.repository.DroneRepository;
 import com.aerofleet.simulation.SimulationEngine;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 @RestController
@@ -22,6 +24,10 @@ public class DroneController {
 
     @GetMapping
     public List<Drone> getAllDrones() {
+        Collection<Drone> runtime = simulationEngine.getRuntimeDrones();
+        if (runtime != null && !runtime.isEmpty()) {
+            return new ArrayList<>(runtime);
+        }
         return droneRepository.findAll();
     }
 

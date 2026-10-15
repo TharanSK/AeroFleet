@@ -46,3 +46,9 @@ VALUES (1, 'ORD-1001', 'Science Library', 200.0, 450.0, 1.5, 'MEDICAL', 'PENDING
 
 INSERT INTO delivery_orders (id, order_number, customer_name, delivery_x, delivery_y, package_weight_kg, priority, status, assigned_drone_id, origin_depot_id, created_at, delivered_at)
 VALUES (2, 'ORD-1002', 'North Dormitory', 600.0, 150.0, 2.0, 'STANDARD', 'PENDING', NULL, 3, CURRENT_TIMESTAMP, NULL);
+
+-- Advance auto-increment sequences past initial seed data
+ALTER TABLE delivery_orders ALTER COLUMN id RESTART WITH 100;
+ALTER TABLE drones ALTER COLUMN id RESTART WITH 100;
+ALTER TABLE depots ALTER COLUMN id RESTART WITH 100;
+ALTER TABLE no_fly_zones ALTER COLUMN id RESTART WITH 100;

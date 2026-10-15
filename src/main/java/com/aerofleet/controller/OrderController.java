@@ -7,7 +7,7 @@ import com.aerofleet.dto.AlertEventDTO;
 import com.aerofleet.dto.CreateOrderRequest;
 import com.aerofleet.repository.DeliveryOrderRepository;
 import com.aerofleet.repository.DepotRepository;
-import com.aerofleet.service.DispatchService;
+import com.aerofleet.simulation.SimulationEngine;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,18 +26,18 @@ public class OrderController {
 
     private final DeliveryOrderRepository orderRepository;
     private final DepotRepository depotRepository;
-    private final DispatchService dispatchService;
+    private final SimulationEngine simulationEngine;
     private final TelemetryBroadcaster telemetryBroadcaster;
     private final Random random = new Random();
 
     public OrderController(
             DeliveryOrderRepository orderRepository,
             DepotRepository depotRepository,
-            DispatchService dispatchService,
+            SimulationEngine simulationEngine,
             TelemetryBroadcaster telemetryBroadcaster) {
         this.orderRepository = orderRepository;
         this.depotRepository = depotRepository;
-        this.dispatchService = dispatchService;
+        this.simulationEngine = simulationEngine;
         this.telemetryBroadcaster = telemetryBroadcaster;
     }
 
@@ -51,7 +51,7 @@ public class OrderController {
 
     @PostMapping
     public ResponseEntity<DeliveryOrder> createOrder(@Valid @RequestBody CreateOrderRequest request) {
-        String orderNum = "ORD-" + (1000 + random.nextInt(9000));
+        String orderNum = "ORD-" + (System.currentTimeMillis() % 100000);
         DeliveryOrder order = new DeliveryOrder(
                 orderNum,
                 request.getCustomerName(),
@@ -70,8 +70,8 @@ public class OrderController {
                 null, saved.getId()
         ));
 
-        // Attempt instant dispatch
-        dispatchService.dispatchPendingOrders();
+        // Trigger instant in-memory dispatch
+        simulationEngine.triggerDispatch();
 
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
@@ -103,7 +103,7 @@ public class OrderController {
             String customer = customers[random.nextInt(customers.length)];
             String priority = priorities[random.nextInt(priorities.length)];
             double weight = Math.round((0.5 + (random.nextDouble() * 4.0)) * 10.0) / 10.0;
-            String orderNum = "ORD-" + (1000 + random.nextInt(9000));
+            String orderNum = "ORD-" + (System.currentTimeMillis() % 100000) + "-" + (i + 1);
 
             DeliveryOrder order = new DeliveryOrder(
                     orderNum, customer, targetX, targetY, weight, priority, baseDepot.getId()
@@ -118,7 +118,7 @@ public class OrderController {
                 null, null
         ));
 
-        dispatchService.dispatchPendingOrders();
+        simulationEngine.triggerDispatch();
 
         return ResponseEntity.ok(createdOrders);
     }
