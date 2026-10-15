@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AeroFleet — Autonomous Drone Fleet Operations & Simulation</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- SockJS and STOMP for WebSocket communication -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden font-sans antialiased">
+
+    <!-- Top Navigation Bar -->
+    <header class="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md px-6 flex items-center justify-between z-20">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <i data-lucide="navigation" class="w-6 h-6 text-white transform rotate-45"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                    AEROFLEET <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800">SIMULATOR v1.0</span>
+                </h1>
+                <p class="text-xs text-slate-400">Autonomous Delivery Fleet & Real-Time Airspace Control</p>
+            </div>
+        </div>
+
+        <!-- Telemetry Stats Pill Bar -->
+        <div class="hidden lg:flex items-center space-x-6 text-xs bg-slate-950/70 py-1.5 px-4 rounded-full border border-slate-800">
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="text-slate-400">Status:</span>
+                <span id="top-sim-status" class="font-semibold text-emerald-400">ACTIVE</span>
+            </div>
+            <div class="h-3 w-px bg-slate-800"></div>
+            <div>
+                <span class="text-slate-400">Drones:</span>
+                <span id="top-drone-count" class="font-semibold text-white ml-1">8</span>
+            </div>
+            <div class="h-3 w-px bg-slate-800"></div>
+            <div>
+                <span class="text-slate-400">In-Flight:</span>
+                <span id="top-inflight-count" class="font-semibold text-cyan-400 ml-1">0</span>
+            </div>
+            <div class="h-3 w-px bg-slate-800"></div>
+            <div>
+                <span class="text-slate-400">Delivered:</span>
+                <span id="top-delivered-count" class="font-semibold text-emerald-400 ml-1">0</span>
+            </div>
+            <div class="h-3 w-px bg-slate-800"></div>
+            <div>
+                <span class="text-slate-400">Sim Clock:</span>
+                <span id="top-sim-clock" class="font-mono font-semibold text-amber-400 ml-1">00:00:00</span>
+            </div>
+        </div>
+
+        <!-- Simulation Speed & Controls -->
+        <div class="flex items-center space-x-3">
+            <div class="flex items-center bg-slate-800/80 rounded-lg p-0.5 border border-slate-700">
+                <button id="btn-toggle-sim" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition">
+                    <i data-lucide="pause" id="icon-toggle-sim" class="w-3.5 h-3.5"></i>
+                    <span id="text-toggle-sim">Pause</span>
+                </button>
+                <div class="flex items-center px-1 space-x-1 text-xs text-slate-300">
+                    <button class="speed-btn px-2 py-1 rounded hover:bg-slate-700 font-mono transition active" data-speed="1.0">1x</button>
+                    <button class="speed-btn px-2 py-1 rounded hover:bg-slate-700 font-mono transition" data-speed="2.0">2x</button>
+                    <button class="speed-btn px-2 py-1 rounded hover:bg-slate-700 font-mono transition" data-speed="5.0">5x</button>
+                    <button class="speed-btn px-2 py-1 rounded hover:bg-slate-700 font-mono transition" data-speed="10.0">10x</button>
+                </div>
+            </div>
+
+            <!-- Weather Dropdown -->
+            <select id="weather-select" class="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500">
+                <option value="CLEAR">☀️ Clear (Optimal)</option>
+                <option value="WINDY">💨 Windy (+30% Drag)</option>
+                <option value="RAIN">🌧️ Rain (+50% Drag)</option>
+                <option value="STORM">⚡ Storm (Severe)</option>
+            </select>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="flex-1 flex overflow-hidden">
+        
+        <!-- Center-Left: Map View Area -->
+        <section class="flex-1 flex flex-col relative">
+            <div id="map" class="w-full h-full bg-slate-900 z-10"></div>
+
+            <!-- Floating Quick Operations HUD -->
+            <div class="absolute top-4 left-4 z-20 flex flex-wrap gap-2 pointer-events-auto">
+                <button id="btn-spawn-orders" class="bg-slate-900/90 hover:bg-cyan-900/80 text-cyan-300 hover:text-white border border-cyan-800/80 shadow-lg backdrop-blur-md px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition">
+                    <i data-lucide="package-plus" class="w-4 h-4"></i>
+                    Queue 5 Orders
+                </button>
+                <button id="btn-open-modal" class="bg-slate-900/90 hover:bg-slate-800 text-slate-200 border border-slate-700 shadow-lg backdrop-blur-md px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition">
+                    <i data-lucide="map-pin" class="w-4 h-4 text-emerald-400"></i>
+                    Custom Drop Point
+                </button>
+                <button id="btn-trigger-storm" class="bg-slate-900/90 hover:bg-amber-900/80 text-amber-300 border border-amber-800/80 shadow-lg backdrop-blur-md px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition">
+                    <i data-lucide="cloud-lightning" class="w-4 h-4"></i>
+                    Inject Storm
+                </button>
+            </div>
+
+            <!-- Map Legend Overlay -->
+            <div class="absolute bottom-4 left-4 z-20 bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-lg p-3 text-xs shadow-xl flex items-center gap-4">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 rounded-full bg-cyan-500"></span>
+                    <span class="text-slate-300">Depot Hub</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 rounded-full bg-emerald-400"></span>
+                    <span class="text-slate-300">Active Drone</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 rounded-full bg-rose-500/80"></span>
+                    <span class="text-slate-300">No-Fly Zone (NFZ)</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 rounded-full bg-amber-400"></span>
+                    <span class="text-slate-300">Drop Target</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Sidebar: Fleet Management, Orders & Telemetry Logs -->
+        <aside class="w-96 border-l border-slate-800 bg-slate-900/95 flex flex-col z-20">
+            
+            <!-- Tab Navigation -->
+            <div class="flex border-b border-slate-800 bg-slate-950/60 text-xs">
+                <button class="tab-btn flex-1 py-3 font-semibold text-center text-cyan-400 border-b-2 border-cyan-500 flex items-center justify-center gap-1.5" data-tab="tab-fleet">
+                    <i data-lucide="plane" class="w-4 h-4"></i> Fleet Telemetry
+                </button>
+                <button class="tab-btn flex-1 py-3 font-semibold text-center text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center justify-center gap-1.5" data-tab="tab-orders">
+                    <i data-lucide="package" class="w-4 h-4"></i> Order Queue
+                </button>
+                <button class="tab-btn flex-1 py-3 font-semibold text-center text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center justify-center gap-1.5" data-tab="tab-logs">
+                    <i data-lucide="activity" class="w-4 h-4"></i> Event Logs
+                </button>
+            </div>
+
+            <!-- Tab 1: Fleet Telemetry -->
+            <div id="tab-fleet" class="tab-content flex-1 overflow-y-auto p-4 space-y-3">
+                <div id="drone-card-container" class="space-y-3">
+                    <!-- Dynamic Drone Cards Rendered by JS -->
+                    <div class="text-center py-10 text-slate-500 text-xs">Loading fleet telemetry...</div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Order Queue -->
+            <div id="tab-orders" class="tab-content flex-1 overflow-y-auto p-4 space-y-3 hidden">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Mission Queue</h3>
+                    <span id="order-queue-count" class="text-xs bg-slate-800 px-2 py-0.5 rounded text-cyan-400 font-mono">0 Orders</span>
+                </div>
+                <div id="order-list-container" class="space-y-2.5">
+                    <!-- Dynamic Orders Rendered by JS -->
+                </div>
+            </div>
+
+            <!-- Tab 3: Event Logs -->
+            <div id="tab-logs" class="tab-content flex-1 overflow-y-auto p-4 space-y-2 hidden">
+                <div class="flex justify-between items-center mb-1">
+                    <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Live Airspace Log</h3>
+                    <button id="btn-clear-logs" class="text-[11px] text-slate-500 hover:text-slate-300">Clear</button>
+                </div>
+                <div id="log-feed" class="space-y-2 font-mono text-[11px]">
+                    <!-- Live STOMP Alert Entries -->
+                </div>
+            </div>
+
+            <!-- Bottom Weather & Wind Gauge -->
+            <footer class="p-3 border-t border-slate-800 bg-slate-950/70 text-xs flex justify-between items-center">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="wind" class="w-4 h-4 text-cyan-400"></i>
+                    <span class="text-slate-400">Wind:</span>
+                    <span id="env-wind" class="font-mono text-slate-200">4.5 m/s @ 45°</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-400">Condition:</span>
+                    <span id="env-condition" class="font-semibold text-emerald-400">CLEAR</span>
+                </div>
+            </footer>
+        </aside>
+    </main>
+
+    <!-- Modal: Create Order -->
+    <div id="order-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-xl p-6 shadow-2xl space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h2 class="text-base font-bold text-white flex items-center gap-2">
+                    <i data-lucide="send" class="w-4 h-4 text-cyan-400"></i> Dispatch New Order
+                </h2>
+                <button id="btn-close-modal" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <form id="order-form" class="space-y-3.5 text-xs">
+                <div>
+                    <label class="block text-slate-400 mb-1">Customer / Facility Name</label>
+                    <input type="text" id="cust-name" required placeholder="e.g. Saint Francis Memorial Clinic" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:border-cyan-500" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 mb-1">Destination Latitude</label>
+                        <input type="number" step="0.0001" id="cust-lat" required value="37.7833" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:border-cyan-500" />
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Destination Longitude</label>
+                        <input type="number" step="0.0001" id="cust-lon" required value="-122.4167" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:border-cyan-500" />
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 mb-1">Package Weight (kg)</label>
+                        <input type="number" step="0.1" min="0.1" max="8.0" id="cust-weight" required value="1.8" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:border-cyan-500" />
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Priority</label>
+                        <select id="cust-priority" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:border-cyan-500">
+                            <option value="STANDARD">Standard Delivery</option>
+                            <option value="EXPRESS">Express Priority</option>
+                            <option value="MEDICAL">Medical Emergency</option>
+                        </select>
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-500">Tip: Click anywhere on the live map to auto-fill latitude and longitude coordinates.</p>
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button type="button" id="btn-cancel-modal" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-semibold transition">Submit to Dispatch</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Application Javascript Modules -->
+    <script src="js/app.js"></script>
+</body>
+</html>

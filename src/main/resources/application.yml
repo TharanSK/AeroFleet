@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: AeroFleet
+  datasource:
+    url: jdbc:h2:mem:aerofleetdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driverClassName: org.h2.Driver
+    username: sa
+    password: 
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    defer-datasource-initialization: true
+  sql:
+    init:
+      mode: always
+
+aerofleet:
+  simulation:
+    tick-interval-ms: 1000
+    speed-multiplier: 1.0
+    auto-start: true
+    min-return-battery-percent: 20.0
+    charging-rate-percent-per-sec: 3.0
+    weather:
+      wind-speed-mps: 4.5
+      wind-direction-deg: 45.0
+      condition: CLEAR
+
+server:
+  port: 8080

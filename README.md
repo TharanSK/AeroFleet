@@ -1,144 +1,97 @@
-# AeroFleet: Autonomous Drone Delivery & Fleet Control Simulator
+# AeroFleet 🚁⚡
+### Autonomous Delivery Drone Fleet Simulation Platform
 
-[![Java](https://img.shields.io/badge/Java-17%2B-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)](https://www.oracle.com/java/)
-[![Swing GUI](https://img.shields.io/badge/GUI-Java%20Swing%2FAWT-5382a1?style=for-the-badge)](https://docs.oracle.com/javase/tutorial/uiswing/)
-[![Database](https://img.shields.io/badge/Database-SQLite%20JDBC-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-
-**AeroFleet** is an interactive, multi-threaded desktop simulation engine where you control an autonomous delivery drone fleet navigating across a simulated 2D city grid. The system handles real-time flight physics, battery drain, weather hazard evasion, concurrent docking synchronization, package dispatching, and persistent flight telemetry logging.
-
-This project was engineered to comprehensively demonstrate all 5 units of the **CS23304 Java Programming** syllabus.
+AeroFleet is an event-driven delivery drone simulation platform built with **Java Spring Boot**. It simulates autonomous drone operations across urban and suburban environments, handling dynamic package dispatching, realistic flight kinematics, battery discharge under payload and weather drag, geofenced No-Fly Zone (NFZ) avoidance, failsafe Return-To-Home (RTH) procedures, and real-time telemetry streaming over WebSockets to an interactive browser dashboard.
 
 ---
 
-## 🗺 System Architecture
+## 🌟 Key Features
 
-```text
-+----------------------------------------------------------------------------------+
-|                            AeroFleet Swing GUI Dashboard                         |
-|  +---------------------------------------------+-------------------------------+ |
-|  |             GridMapPanel (2D Canvas)        |      TelemetryPanel           | |
-|  |  * Custom paintComponent rendering         |  * Live Battery JProgressBar  | |
-|  |  * City grid, storm zones, charging hubs    |  * Coordinates, Status Badge  | |
-|  |  * Real-time animated drone positions       |  * Streams Fleet Statistics   | |
-|  +---------------------------------------------+-------------------------------+ |
-|  |           MissionLogPanel (JTable of Flight Telemetry & Blackbox Records)   | |
-+--+-------------------------------------------------------------------------------+--+
-                                        ▲
-                                        │  30 FPS Repaint Timer & Event Listeners
-                                        ▼
-+----------------------------------------------------------------------------------+
-|                            Simulation Engine (Concurrency)                       |
-|  * ConcurrentHashMap<String, Drone> Fleet Registry                               |
-|  * Independent Drone Threads (Runnable physics loop at 10 ticks/sec)             |
-|  * ChargingHub: synchronized docking pads with wait() and notifyAll()            |
-|  * Streams API: Nearest-neighbor drone filtering & capacity checks               |
-+----------------------------------------------------------------------------------+
-          ▲                                                    ▲
-          │ Object Serialization                               │ JDBC Driver
-          ▼                                                    ▼
-+-----------------------------+               +------------------------------------+
-|  aerofleet_blackbox.dat     |               |  aerofleet.db (SQLite)             |
-|  (FlightLogSerializer)      |               |  (DatabaseManager PreparedStatement|
-+-----------------------------+               +------------------------------------+
-```
+1. **Simulation & Flight Kinematics Engine**:
+   - Multi-phase 3D flight profiles: `TAKEOFF` $\to$ `EN_ROUTE_DELIVERY` $\to$ `DESCENDING_DELIVERY` $\to$ `DELIVERING` $\to$ `ASCENDING_DELIVERY` $\to$ `RETURNING` $\to$ `LANDING` $\to$ `CHARGING`.
+   - Spherical distance and bearing math using the Haversine formula and waypoint progression.
+   - Dynamic time-warp multiplier (1x, 2x, 5x, 10x) and simulation pause/resume.
+
+2. **Energy & Battery Consumption Model**:
+   - Dynamic power draw factoring avionics baseline, payload mass ratio ($W_{\text{payload}} / W_{\text{max}}$), vertical climb penalty, and environmental drag.
+   - Automatic battery charging on depot pads at 3%/sec until full.
+   - Low-battery failsafe Return-To-Home (RTH) triggering immediate diversion to the nearest depot.
+
+3. **Geofencing & Airspace Protection**:
+   - 3D No-Fly Zones (NFZs) around sensitive sites (hospitals, heliports, government facilities).
+   - Real-time path intersection detection and automated detour waypoint deflection.
+
+4. **Intelligent Dispatch Engine**:
+   - Evaluates pending orders and pairs them with optimal drones based on payload capacity, proximity, battery state-of-charge, and range reachability.
+
+5. **Real-Time Telemetry & Modern Web Dashboard**:
+   - High-frequency STOMP over WebSocket streaming to a single-page Leaflet.js radar map.
+   - Live drone cards with battery gauges, altitude, speed, payload indicators, manual recall, and fault injection buttons.
+   - One-click batch delivery generator and interactive map click-to-dispatch.
 
 ---
 
-## 📚 Complete Syllabus Integration (CS23304)
+## 🛠️ Technology Stack
 
-### Unit I: Introduction to Java & OOP
-* **Classes & Encapsulation:** Private properties, getters, setters, and constructors in `Location`, `PackageCargo`, and `Drone`.
-* **Date & Time API:** Uses `java.time.LocalDateTime` and `DateTimeFormatter` for tracking delivery launch and arrival times.
-* **Static Members & Constants:** Atomic static counter `ID_GENERATOR` for incremental tracking IDs; class constants like `LOW_BATTERY_WARNING = 25.0`.
-* **`this` Keyword & Math API:** Coordinate distance calculations using `Math.sqrt()` and trigonometry `Math.atan2()`.
-
-### Unit II: Polymorphism & Inheritance
-* **Abstract Base Class:** `Drone` defines common behaviors (`moveToward()`, `recharge()`, `tickPhysics()`).
-* **Subclasses & Overriding:**
-  * `QuadCopter`: High agility, lighter payload ($3.0\text{ kg}$).
-  * `HexaHeavyLift`: Industrial payload ($10.0\text{ kg}$), wind-resistant dual-battery mechanics.
-  * `LongRangeFixedWing`: Aerodynamic cruising model for rapid long-range transport.
-* **Interfaces:** `Navigable` (navigation & heading mechanics) and `ChargerCompatible` (battery charging rates).
-* **`instanceof` & Downcasting:** Used in dispatcher checks to inspect specialized drone subclasses before allocating critical payloads.
-
-### Unit III: Exception Handling & Multithreading
-* **Custom User-Defined Exceptions:**
-  * `BatteryDepletedException`: Thrown if a drone runs out of battery before reaching a hub.
-  * `PayloadExceededException`: Thrown when a cargo exceeds the drone's rated payload capacity.
-  * `NoRouteFoundException`: Thrown when no idle drone has sufficient battery or range.
-* **Concurrent Flight Threads:** Every active drone implements `Runnable` and executes concurrently in an `ExecutorService` thread pool.
-* **Thread Synchronization:**
-  * `ChargingHub` implements `synchronized` docking pads.
-  * When both pads are occupied, arriving drones invoke `wait()` to pause their threads until an undocking drone calls `notifyAll()`, completely avoiding deadlocks and race conditions.
-
-### Unit IV: File Streams, Databases & Modern Java Features
-* **Java Streams API & Lambdas:**
-  * Filters available drones by status, battery level, and payload capacity using `.filter()`.
-  * Computes fleet metrics with `.mapToDouble()`, `.average()`, and `.mapToInt().sum()`.
-  * Selects closest eligible drone using `.min(Comparator.comparingDouble(...))`.
-* **Regular Expressions:** `PackageCargo.PHONE_REGEX` validates recipient contact numbers (e.g., `^[+]?[0-9]{10,13}$`).
-* **Object Serialization:** Binary serialization and deserialization of `FlightLog` instances to `aerofleet_flight_blackbox.dat` via `ObjectOutputStream` and `ObjectInputStream`.
-* **Database Connectivity (JDBC):** Uses SQLite via `DatabaseManager` to persist completed missions and telemetry using `PreparedStatement` and query with `ResultSet`.
-* **File I/O Streams:** Exports live mission logs directly to a `.csv` file using `BufferedWriter` and `FileWriter`.
-
-### Unit V: GUI Development & Frameworks (AWT / Swing)
-* **Custom 2D Graphics:** `GridMapPanel` overrides `paintComponent(Graphics g)` to render animated drones, radar grids, rotating blade indicators, and semi-transparent weather zones.
-* **Decoupled 30 FPS Render Loop:** A dedicated `javax.swing.Timer` repaints the UI at 30 FPS on the Event Dispatch Thread (EDT) without freezing the background drone physics threads.
-* **Swing Components & Layouts:** `JFrame`, `JSplitPane`, `JTable`, `JProgressBar`, `JToolBar`, `JSpinner`, `JComboBox`, `TitledBorder`.
-* **Event Handling:** `MouseAdapter` click listeners to select drones on the canvas, `ActionListener` lambdas, and modal `JDialog` forms.
+- **Backend**: Spring Boot 3.3.5, Spring Data JPA, Spring WebSocket (STOMP/SockJS), Jakarta Validation
+- **Database**: H2 In-Memory Database (with preloaded depots, drones, and airspace zones)
+- **Frontend**: Single-Page Application (HTML5, Tailwind CSS, Leaflet.js, Lucide Icons, SockJS, StompJS)
+- **Build & Runtime**: Maven Wrapper (`mvnw`), Java 17 / 21+
 
 ---
 
-## 🚀 How to Run the Project
+## 🚀 Quick Start
 
-### Prerequisites
-* **Java Development Kit (JDK) 17 or higher**
-* (Optional) **Apache Maven** (if running via command line)
+### 1. Build and Run the Application
 
-### Option 1: Run with Maven (Recommended)
+Using the bundled Maven wrapper:
+
 ```bash
-# Clone the repository
-git clone https://github.com/SwamynattanSS/Aero-Fleet-App.git
-cd Aero-Fleet-App
+# Windows
+.\mvnw.cmd spring-boot:run
 
-# Compile and launch the simulator
-mvn clean compile exec:java
+# Linux / macOS
+./mvnw spring-boot:run
 ```
 
-### Option 2: Open in any IDE
-* **IntelliJ IDEA:** Open folder $\rightarrow$ Select `pom.xml` as project $\rightarrow$ Run `Main.java`.
-* **Eclipse:** File $\rightarrow$ Import $\rightarrow$ Existing Maven Projects $\rightarrow$ Run as Java Application.
-* **NetBeans:** File $\rightarrow$ Open Project $\rightarrow$ Run.
-* **VS Code:** Open folder with the Java Extension Pack installed $\rightarrow$ Click **Run** on `Main.java`.
-
-### Option 3: Compile and Run via `javac` (Zero Dependencies)
+Alternatively with system Maven:
 ```bash
-# Compile all source files
-javac -d bin src/main/java/com/aerofleet/model/*.java \
-             src/main/java/com/aerofleet/exceptions/*.java \
-             src/main/java/com/aerofleet/concurrency/*.java \
-             src/main/java/com/aerofleet/persistence/*.java \
-             src/main/java/com/aerofleet/ui/*.java \
-             src/main/java/com/aerofleet/Main.java
-
-# Run the simulator
-java -cp bin com.aerofleet.Main
+mvn spring-boot:run
 ```
 
----
+### 2. Open the Live Mission Control Center
 
-## 🎯 Viva & Defense Q&A Cheatsheet
+Open your browser and navigate to:
+```
+http://localhost:8080
+```
 
-| Question | Code Reference & Answer |
-| :--- | :--- |
-| **Q1. How do you prevent UI freezing when drones are flying?** | "We decoupled rendering from physics. Drones run in background threads (`Runnable` in `ExecutorService`), while the GUI is updated at 30 FPS using `javax.swing.Timer` on the Event Dispatch Thread (EDT)." |
-| **Q2. How is thread synchronization implemented?** | "`ChargingHub` has limited pads. When all pads are occupied, drone threads invoke `wait()`. Once a drone finishes recharging, it releases the pad and triggers `notifyAll()` to wake up waiting drones without race conditions or deadlocks." |
-| **Q3. Where is the Streams API used?** | "In `SimulationEngine.dispatchPackage()`, where we use `.filter()` to check battery and payload, and `.min(Comparator.comparingDouble(...))` to find the nearest drone using a lambda expression." |
-| **Q4. What is the difference between File I/O and Serialization here?** | "We use Object Serialization (`ObjectOutputStream`) for saving and restoring full binary `FlightLog` state objects, while standard `BufferedWriter` is used for exporting CSV spreadsheets." |
-| **Q5. How does JDBC work without a separate SQL server?** | "We use SQLite (`sqlite-jdbc`). It stores data inside a portable local file (`aerofleet.db`) using `PreparedStatement` and `ResultSet` without requiring a standalone MySQL server." |
+- **H2 Database Console**: `http://localhost:8080/h2-console` (JDBC URL: `jdbc:h2:mem:aerofleetdb`, User: `sa`, Password: empty)
 
 ---
 
-## 📜 License
-This project is open-source and released under the MIT License.
+## 📡 REST API Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/v1/drones` | List all drones with current telemetry and status |
+| `GET` | `/api/v1/drones/{id}` | Get specific drone details |
+| `POST` | `/api/v1/drones/{id}/recall` | Trigger manual emergency Return-To-Home |
+| `GET` | `/api/v1/orders` | List delivery orders (optional `?status=PENDING`) |
+| `POST` | `/api/v1/orders` | Create a new delivery order |
+| `POST` | `/api/v1/orders/simulate-batch` | Generate $N$ randomized delivery missions |
+| `GET` | `/api/v1/depots` | List all base stations and charging pads |
+| `GET` | `/api/v1/geofence` | List active No-Fly Zones (NFZs) |
+| `GET` | `/api/v1/simulation/status` | Current clock, speed multiplier, and weather |
+| `POST` | `/api/v1/simulation/control` | Control pause/play, speed (1x-10x), and weather |
+| `POST` | `/api/v1/simulation/incident` | Inject fault (e.g. `BATTERY_DRAIN`, `MOTOR_FAULT`) |
+
+---
+
+## 🧪 Running Automated Tests
+
+Run the test suite verifying kinematics, battery model, geofencing, and Spring context:
+
+```bash
+.\mvnw.cmd test
+```
