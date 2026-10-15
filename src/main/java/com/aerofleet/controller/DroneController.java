@@ -33,6 +33,10 @@ public class DroneController {
 
     @GetMapping("/{id}")
     public ResponseEntity<Drone> getDroneById(@PathVariable Long id) {
+        Drone runtimeDrone = simulationEngine.getRuntimeDrone(id);
+        if (runtimeDrone != null) {
+            return ResponseEntity.ok(runtimeDrone);
+        }
         return droneRepository.findById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -40,6 +44,11 @@ public class DroneController {
 
     @PostMapping("/{id}/recall")
     public ResponseEntity<String> recallDrone(@PathVariable Long id) {
+        Drone runtimeDrone = simulationEngine.getRuntimeDrone(id);
+        if (runtimeDrone != null) {
+            simulationEngine.triggerEmergencyRth(runtimeDrone, "Manual operator recall");
+            return ResponseEntity.ok("Drone " + runtimeDrone.getCallsign() + " recalled to nearest depot.");
+        }
         return droneRepository.findById(id).map(drone -> {
             simulationEngine.triggerEmergencyRth(drone, "Manual operator recall");
             return ResponseEntity.ok("Drone " + drone.getCallsign() + " recalled to nearest depot.");

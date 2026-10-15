@@ -4,6 +4,7 @@ import com.aerofleet.domain.model.NoFlyZone;
 import com.aerofleet.dto.AlertEventDTO;
 import com.aerofleet.dto.CreateZoneRequest;
 import com.aerofleet.repository.NoFlyZoneRepository;
+import com.aerofleet.simulation.SimulationEngine;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,12 +21,15 @@ public class GeofenceController {
 
     private final NoFlyZoneRepository noFlyZoneRepository;
     private final TelemetryBroadcaster telemetryBroadcaster;
+    private final SimulationEngine simulationEngine;
 
     public GeofenceController(
             NoFlyZoneRepository noFlyZoneRepository,
-            TelemetryBroadcaster telemetryBroadcaster) {
+            TelemetryBroadcaster telemetryBroadcaster,
+            SimulationEngine simulationEngine) {
         this.noFlyZoneRepository = noFlyZoneRepository;
         this.telemetryBroadcaster = telemetryBroadcaster;
+        this.simulationEngine = simulationEngine;
     }
 
     @GetMapping
@@ -52,6 +56,9 @@ public class GeofenceController {
                 null, null
         ));
 
+        // Dynamically recalculate routes for any in-flight drones affected by the new zone
+        simulationEngine.rerouteActiveDronesForZoneUpdate();
+
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
@@ -65,6 +72,7 @@ public class GeofenceController {
                     "No-Fly Zone '" + zone.getName() + "' has been removed from airspace registry",
                     null, null
             ));
+            simulationEngine.rerouteActiveDronesForZoneUpdate();
             return ResponseEntity.noContent().<Void>build();
         }).orElse(ResponseEntity.notFound().build());
     }
@@ -79,6 +87,7 @@ public class GeofenceController {
                 "All " + count + " restricted No-Fly Zones have been decommissioned and removed",
                 null, null
         ));
+        simulationEngine.rerouteActiveDronesForZoneUpdate();
         return ResponseEntity.noContent().build();
     }
 
@@ -93,6 +102,7 @@ public class GeofenceController {
                     "No-Fly Zone '" + updated.getName() + "' is now " + (updated.isActive() ? "ACTIVE (Avoidance Engaged)" : "INACTIVE"),
                     null, null
             ));
+            simulationEngine.rerouteActiveDronesForZoneUpdate();
             return ResponseEntity.ok(updated);
         }).orElse(ResponseEntity.notFound().build());
     }

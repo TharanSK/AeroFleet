@@ -57,6 +57,9 @@ public class NoFlyZone {
 
     /**
      * Checks if a line segment between p1 and p2 passes inside this circular zone.
+     * Uses standard Euclidean point-to-segment projection geometry:
+     * Projects circle center C onto line segment AB, clamps projection scalar t to [0, 1],
+     * and evaluates minimum distance squared <= radius^2.
      */
     public boolean intersectsPath(Location p1, Location p2) {
         if (!active || p1 == null || p2 == null) return false;
@@ -69,17 +72,27 @@ public class NoFlyZone {
             return true;
         }
 
-        // Sample points along line segment
-        int steps = 12;
-        for (int i = 1; i < steps; i++) {
-            double fraction = (double) i / steps;
-            double sampleX = p1.getX() + (p2.getX() - p1.getX()) * fraction;
-            double sampleY = p1.getY() + (p2.getY() - p1.getY()) * fraction;
-            if (violatesZone(new Location(sampleX, sampleY))) {
-                return true;
-            }
+        double dx = p2.getX() - p1.getX();
+        double dy = p2.getY() - p1.getY();
+        double segLengthSq = dx * dx + dy * dy;
+
+        if (segLengthSq == 0.0) {
+            return d1 <= radius;
         }
-        return false;
+
+        // Projection scalar of center C onto vector AB: t = ((C - A) . (B - A)) / |B - A|^2
+        double t = ((center.getX() - p1.getX()) * dx + (center.getY() - p1.getY()) * dy) / segLengthSq;
+        // Clamp to segment endpoints [0, 1]
+        t = Math.max(0.0, Math.min(1.0, t));
+
+        // Closest point on segment
+        double closestX = p1.getX() + t * dx;
+        double closestY = p1.getY() + t * dy;
+
+        double distSq = (center.getX() - closestX) * (center.getX() - closestX) +
+                        (center.getY() - closestY) * (center.getY() - closestY);
+
+        return distSq <= (radius * radius);
     }
 
     public Long getId() {

@@ -2,6 +2,9 @@ package com.aerofleet.dto;
 
 import com.aerofleet.domain.enums.DroneModelType;
 import com.aerofleet.domain.enums.DroneStatus;
+import com.aerofleet.domain.model.Location;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Real-time telemetry snapshot packet for a single drone.
@@ -23,6 +26,7 @@ public class TelemetryPacketDTO {
     private Long depotId;
     private int waypointIndex;
     private int totalWaypoints;
+    private List<Location> remainingWaypoints = new ArrayList<>();
 
     public TelemetryPacketDTO() {
     }
@@ -153,5 +157,13 @@ public class TelemetryPacketDTO {
 
     public void setTotalWaypoints(int totalWaypoints) {
         this.totalWaypoints = totalWaypoints;
+    }
+
+    public List<Location> getRemainingWaypoints() {
+        return remainingWaypoints;
+    }
+
+    public void setRemainingWaypoints(List<Location> remainingWaypoints) {
+        this.remainingWaypoints = remainingWaypoints;
     }
 }

@@ -42,4 +42,23 @@ public class NoFlyZoneTest {
         assertFalse(zone.violatesZone(inside), "Deactivated zone must not trigger violation");
         assertFalse(zone.intersectsPath(new Location(300.0, 300.0), new Location(500.0, 300.0)), "Deactivated zone must not block path");
     }
+
+    @Test
+    public void testExactLineIntersectionSmallRadius() {
+        // Small hazard zone at center (400, 300) with small radius of 25 units
+        NoFlyZone smallZone = new NoFlyZone(3L, "Small Mast", 400.0, 300.0, 25.0, true);
+
+        // Long diagonal flight from (150, 180) to (650, 420) that passes exactly through (400, 300)
+        Location start = new Location(150.0, 180.0);
+        Location end = new Location(650.0, 420.0);
+
+        assertTrue(smallZone.intersectsPath(start, end),
+                "Exact projection must detect diagonal intersection even when radius is small");
+
+        // Clear parallel path shifted by 40 units north (Y - 40)
+        Location safeStart = new Location(150.0, 140.0);
+        Location safeEnd = new Location(650.0, 380.0);
+        assertFalse(smallZone.intersectsPath(safeStart, safeEnd),
+                "Path passing outside radius must not intersect");
+    }
 }

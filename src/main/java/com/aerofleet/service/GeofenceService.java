@@ -4,6 +4,7 @@ import com.aerofleet.domain.model.Location;
 import com.aerofleet.domain.model.NoFlyZone;
 import com.aerofleet.repository.NoFlyZoneRepository;
 import org.springframework.stereotype.Service;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,14 +30,19 @@ public class GeofenceService {
     }
 
     public Optional<NoFlyZone> getIntersectedZone(Location start, Location end) {
+        return getClosestIntersectedZone(start, end);
+    }
+
+    public Optional<NoFlyZone> getClosestIntersectedZone(Location start, Location end) {
         if (start == null || end == null) return Optional.empty();
         return getActiveZones().stream()
                 .filter(zone -> zone.intersectsPath(start, end))
-                .findFirst();
+                .min(Comparator.comparingDouble(zone -> zone.getCenterLocation().distanceTo(start)));
     }
 
     /**
-     * Calculates a simple 2D detour waypoint routing around the circular No-Fly Zone.
+     * Calculates an optimal 2D detour waypoint routing around the circular No-Fly Zone.
+     * Evaluates both perpendicular normal directions and selects the shorter perimeter path.
      */
     public Location calculateBypassWaypoint(Location start, Location end, NoFlyZone zone) {
         Location center = zone.getCenterLocation();
@@ -51,18 +57,31 @@ public class GeofenceService {
             return new Location(center.getX() + safetyDistance, center.getY());
         }
 
-        // Perpendicular normal vector: (-dy, dx)
+        // Perpendicular normal unit vector: (-dy, dx)
         double nx = -dy / length;
         double ny = dx / length;
 
-        // Push detour point outward from circle center along normal
-        double bypassX = center.getX() + (nx * safetyDistance);
-        double bypassY = center.getY() + (ny * safetyDistance);
+        // Candidate 1 (+normal) and Candidate 2 (-normal)
+        Location bypass1 = new Location(
+                Math.max(20.0, Math.min(780.0, center.getX() + (nx * safetyDistance))),
+                Math.max(20.0, Math.min(580.0, center.getY() + (ny * safetyDistance)))
+        );
+        Location bypass2 = new Location(
+                Math.max(20.0, Math.min(780.0, center.getX() - (nx * safetyDistance))),
+                Math.max(20.0, Math.min(580.0, center.getY() - (ny * safetyDistance)))
+        );
 
-        // Keep inside reasonable grid bounds [10, 790]
-        bypassX = Math.max(20.0, Math.min(780.0, bypassX));
-        bypassY = Math.max(20.0, Math.min(580.0, bypassY));
+        // Avoid pushing into another restricted zone
+        boolean v1 = isPointInRestrictedAirspace(bypass1);
+        boolean v2 = isPointInRestrictedAirspace(bypass2);
 
-        return new Location(bypassX, bypassY);
+        if (!v1 && v2) return bypass1;
+        if (v1 && !v2) return bypass2;
+
+        // Choose shorter total flight detour distance
+        double dist1 = start.distanceTo(bypass1) + bypass1.distanceTo(end);
+        double dist2 = start.distanceTo(bypass2) + bypass2.distanceTo(end);
+
+        return dist1 <= dist2 ? bypass1 : bypass2;
     }
 }

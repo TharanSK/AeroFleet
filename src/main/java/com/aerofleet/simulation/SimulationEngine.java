@@ -28,6 +28,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -167,16 +168,25 @@ public class SimulationEngine {
     private void processDroneTick(Drone drone, double deltaSeconds) {
         DroneStatus status = drone.getStatus();
 
-        // Stationary state
-        if (status == DroneStatus.IDLE || status == DroneStatus.MAINTENANCE) {
+        // 1. Auto-dock charging: Any stationary drone at a depot with < 100% battery charges
+        if (drone.getBatteryPercent() < 100.0 && isStationaryAtDepot(drone)) {
+            if (status == DroneStatus.IDLE) {
+                drone.setStatus(DroneStatus.CHARGING);
+                status = DroneStatus.CHARGING;
+            }
+        }
+
+        // Stationary state: Maintenance or fully charged idle drones
+        if (status == DroneStatus.MAINTENANCE || (status == DroneStatus.IDLE && drone.getBatteryPercent() >= 100.0)) {
             return;
         }
 
-        // Charging on pad at depot
+        // 2. Charging on pad at depot
         if (status == DroneStatus.CHARGING) {
             double newBattery = batteryDrainModel.updateBattery(drone, deltaSeconds);
             drone.setBatteryPercent(newBattery);
             if (newBattery >= 100.0) {
+                drone.setBatteryPercent(100.0);
                 drone.setStatus(DroneStatus.IDLE);
                 telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
                         "INFO", "Charging Complete", "Drone [" + drone.getCallsign() + "] charged to 100%.",
@@ -296,6 +306,9 @@ public class SimulationEngine {
             drone.setSpeed(0.0);
             drone.setAssignedOrderId(null);
             drone.clearFlightPlan();
+            if (drone.getCurrentDepotId() == null) {
+                assignNearestDepot(drone);
+            }
 
             telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
                     "INFO", "Landed at Hub",
@@ -308,29 +321,96 @@ public class SimulationEngine {
         drone.advanceWaypoint();
     }
 
+    public boolean isStationaryAtDepot(Drone drone) {
+        if (drone == null) return false;
+        if (drone.getSpeed() > 0.0) return false;
+        DroneStatus s = drone.getStatus();
+        if (s != DroneStatus.IDLE && s != DroneStatus.CHARGING && s != DroneStatus.LANDING) {
+            return false;
+        }
+        if (drone.getCurrentDepotId() != null) {
+            return true;
+        }
+        return assignNearestDepot(drone);
+    }
+
+    private boolean assignNearestDepot(Drone drone) {
+        List<Depot> depots = depotRepository.findAll();
+        for (Depot d : depots) {
+            if (drone.getLocation().distanceTo(d.getLocation()) <= 40.0) {
+                drone.setCurrentDepotId(d.getId());
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public Drone getRuntimeDrone(Long id) {
+        if (id == null) return null;
+        return runtimeDrones.get(id);
+    }
+
+    public synchronized void rerouteActiveDronesForZoneUpdate() {
+        List<Depot> allDepots = depotRepository.findAll();
+        for (Drone drone : runtimeDrones.values()) {
+            DroneStatus status = drone.getStatus();
+            if (status != DroneStatus.EN_ROUTE_DELIVERY && status != DroneStatus.RETURNING && status != DroneStatus.EMERGENCY_RTH) {
+                continue;
+            }
+
+            boolean hasIntersection = routingService.remainingRouteHasZoneIntersection(drone);
+            if (hasIntersection) {
+                DeliveryOrder order = null;
+                if (drone.getAssignedOrderId() != null) {
+                    order = orderRepository.findById(drone.getAssignedOrderId()).orElse(null);
+                }
+                Depot depot = allDepots.stream()
+                        .filter(d -> d.getId().equals(drone.getCurrentDepotId()))
+                        .findFirst()
+                        .orElse(allDepots.isEmpty() ? null : allDepots.get(0));
+
+                if (depot != null) {
+                    List<Waypoint> newRoute = routingService.replanInFlightDrone(drone, order, depot);
+                    if (!newRoute.isEmpty()) {
+                        drone.setWaypoints(newRoute);
+                        telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
+                                "WARN", "Flight Path Adapted",
+                                "Drone [" + drone.getCallsign() + "] rerouted around newly restricted airspace.",
+                                drone.getId(), drone.getAssignedOrderId()
+                        ));
+                        log.info("Rerouted drone {} around updated airspace with {} waypoints", drone.getCallsign(), newRoute.size());
+                    }
+                }
+            }
+        }
+    }
+
     public void triggerEmergencyRth(Drone drone, String reason) {
-        log.warn("Emergency RTH triggered for Drone [{}] due to: {}", drone.getCallsign(), reason);
+        if (drone == null) return;
+        Drone activeDrone = runtimeDrones.getOrDefault(drone.getId(), drone);
+        log.warn("Emergency RTH triggered for Drone [{}] due to: {}", activeDrone.getCallsign(), reason);
 
         // Find nearest depot on 2D grid
         List<Depot> depots = depotRepository.findAll();
         Depot nearestDepot = depots.stream()
-                .min(Comparator.comparingDouble(d -> d.getLocation().distanceTo(drone.getLocation())))
+                .min(Comparator.comparingDouble(d -> d.getLocation().distanceTo(activeDrone.getLocation())))
                 .orElse(null);
 
         if (nearestDepot != null) {
-            List<Waypoint> rthRoute = routingService.buildEmergencyRthRoute(drone, nearestDepot);
-            drone.setWaypoints(rthRoute);
-            drone.setStatus(DroneStatus.EMERGENCY_RTH);
-            drone.setCurrentDepotId(nearestDepot.getId());
+            List<Waypoint> rthRoute = routingService.buildEmergencyRthRoute(activeDrone, nearestDepot);
+            activeDrone.setWaypoints(rthRoute);
+            activeDrone.setStatus(DroneStatus.EMERGENCY_RTH);
+            activeDrone.setCurrentDepotId(nearestDepot.getId());
+            activeDrone.setSpeed(activeDrone.getModelType().getMaxSpeedMps() * 0.8);
 
             telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
                     "DANGER", "Emergency RTH",
-                    drone.getCallsign() + " aborting: " + reason,
-                    drone.getId(), drone.getAssignedOrderId()
+                    activeDrone.getCallsign() + " aborting: " + reason,
+                    activeDrone.getId(), activeDrone.getAssignedOrderId()
             ));
 
-            if (drone.getAssignedOrderId() != null) {
-                orderRepository.findById(drone.getAssignedOrderId()).ifPresent(order -> {
+            if (activeDrone.getAssignedOrderId() != null) {
+                orderRepository.findById(activeDrone.getAssignedOrderId()).ifPresent(order -> {
                     order.setStatus(OrderStatus.FAILED);
                     orderRepository.save(order);
                     telemetryBroadcaster.broadcastOrderUpdate(order);
@@ -346,9 +426,13 @@ public class SimulationEngine {
         if ("BATTERY_DRAIN".equalsIgnoreCase(type)) {
             double current = drone.getBatteryPercent();
             drone.setBatteryPercent(Math.max(5.0, current - magnitude));
+            if (isStationaryAtDepot(drone)) {
+                drone.setStatus(DroneStatus.CHARGING);
+            }
             telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
                     "WARN", "Incident Injected",
-                    "Forced battery drop by " + magnitude + "% on " + drone.getCallsign(),
+                    "Forced battery drop by " + magnitude + "% on " + drone.getCallsign() +
+                    (isStationaryAtDepot(drone) ? " (Recharging engaged)" : ""),
                     drone.getId(), null
             ));
         } else if ("MOTOR_FAULT".equalsIgnoreCase(type)) {
@@ -391,6 +475,15 @@ public class SimulationEngine {
             }
             pkt.setWaypointIndex(drone.getCurrentWaypointIndex());
             pkt.setTotalWaypoints(drone.getWaypoints() != null ? drone.getWaypoints().size() : 0);
+
+            // Populate remaining waypoints for complete route visualization on radar
+            List<Location> remainingLocs = new ArrayList<>();
+            if (drone.getWaypoints() != null && drone.getCurrentWaypointIndex() < drone.getWaypoints().size()) {
+                for (int i = drone.getCurrentWaypointIndex(); i < drone.getWaypoints().size(); i++) {
+                    remainingLocs.add(drone.getWaypoints().get(i).getLocation());
+                }
+            }
+            pkt.setRemainingWaypoints(remainingLocs);
 
             snapshot.getDrones().add(pkt);
 

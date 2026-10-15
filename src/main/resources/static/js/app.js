@@ -316,13 +316,55 @@ document.addEventListener('DOMContentLoaded', () => {
     function drawFlightPaths() {
         drones.forEach(d => {
             const isFlying = d.status !== 'IDLE' && d.status !== 'CHARGING' && d.status !== 'MAINTENANCE';
-            if (isFlying && d.targetX != null && d.targetY != null) {
-                const sx = toScreenX(d.x);
-                const sy = toScreenY(d.y);
+            if (!isFlying) return;
+
+            const sx = toScreenX(d.x);
+            const sy = toScreenY(d.y);
+
+            // If remaining waypoints are available, draw full continuous corridor polyline
+            if (d.remainingWaypoints && d.remainingWaypoints.length > 0) {
+                ctx.strokeStyle = getStatusColor(d.status);
+                ctx.lineWidth = 1.8;
+                ctx.setLineDash([5, 4]);
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                d.remainingWaypoints.forEach(wp => {
+                    ctx.lineTo(toScreenX(wp.x), toScreenY(wp.y));
+                });
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Draw intermediate detour dots & final destination pin
+                d.remainingWaypoints.forEach((wp, idx) => {
+                    const wx = toScreenX(wp.x);
+                    const wy = toScreenY(wp.y);
+                    const isLast = (idx === d.remainingWaypoints.length - 1);
+
+                    if (isLast) {
+                        ctx.fillStyle = '#f43f5e';
+                        ctx.beginPath();
+                        ctx.arc(wx, wy, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+
+                        ctx.fillStyle = '#fbcfe8';
+                        ctx.font = 'bold 9px monospace';
+                        ctx.fillText(`Target (${Math.round(wp.x)}, ${Math.round(wp.y)})`, wx + 7, wy - 3);
+                    } else {
+                        // Intermediate detour waypoint dot
+                        ctx.fillStyle = '#38bdf8';
+                        ctx.beginPath();
+                        ctx.arc(wx, wy, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                });
+            } else if (d.targetX != null && d.targetY != null) {
+                // Fallback to direct leg line
                 const tx = toScreenX(d.targetX);
                 const ty = toScreenY(d.targetY);
 
-                // Flight path line
                 ctx.strokeStyle = getStatusColor(d.status);
                 ctx.lineWidth = 1.5;
                 ctx.setLineDash([4, 4]);
@@ -332,7 +374,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.stroke();
                 ctx.setLineDash([]);
 
-                // Target Destination Pin
                 ctx.fillStyle = '#f43f5e';
                 ctx.beginPath();
                 ctx.arc(tx, ty, 5, 0, Math.PI * 2);
