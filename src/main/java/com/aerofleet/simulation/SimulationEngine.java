@@ -15,6 +15,7 @@ import com.aerofleet.repository.DeliveryOrderRepository;
 import com.aerofleet.repository.DepotRepository;
 import com.aerofleet.repository.DroneRepository;
 import com.aerofleet.service.DispatchService;
+import com.aerofleet.service.GeofenceService;
 import com.aerofleet.service.RoutingService;
 import com.aerofleet.service.WeatherService;
 import jakarta.annotation.PostConstruct;
@@ -51,6 +52,7 @@ public class SimulationEngine {
     private final RoutingService routingService;
     private final BatteryDrainModel batteryDrainModel;
     private final WeatherService weatherService;
+    private final GeofenceService geofenceService;
     private final TelemetryBroadcaster telemetryBroadcaster;
 
     // Thread-safe in-memory cache for live drones with runtime flight plans
@@ -76,6 +78,7 @@ public class SimulationEngine {
             RoutingService routingService,
             BatteryDrainModel batteryDrainModel,
             WeatherService weatherService,
+            GeofenceService geofenceService,
             TelemetryBroadcaster telemetryBroadcaster) {
         this.droneRepository = droneRepository;
         this.orderRepository = orderRepository;
@@ -84,6 +87,7 @@ public class SimulationEngine {
         this.routingService = routingService;
         this.batteryDrainModel = batteryDrainModel;
         this.weatherService = weatherService;
+        this.geofenceService = geofenceService;
         this.telemetryBroadcaster = telemetryBroadcaster;
     }
 
@@ -200,7 +204,22 @@ public class SimulationEngine {
 
         double distanceToTarget = currentLoc.distanceTo(targetLoc);
         double targetSpeed = targetWaypoint.getTargetSpeed();
-        double stepDistance = targetSpeed * deltaSeconds;
+        double effectiveSpeed = targetSpeed;
+
+        if (targetSpeed > 0.0) {
+            // Factor in relative wind: tailwind assists, headwind slows drone down
+            double windSpeed = weatherService.getWindSpeedMps();
+            double windDir = weatherService.getWindDirectionDeg();
+            double heading = currentLoc.bearingTo(targetLoc);
+            // Meteorological wind direction is where the wind originates FROM.
+            // Vector the wind travels TOWARD is (windDir + 180) % 360
+            double windTravelDir = (windDir + 180.0) % 360.0;
+            double relAngleRad = Math.toRadians(heading - windTravelDir);
+            double windFactor = Math.cos(relAngleRad) * (windSpeed * 0.3);
+            effectiveSpeed = Math.max(5.0, targetSpeed + windFactor);
+        }
+
+        double stepDistance = effectiveSpeed * deltaSeconds;
 
         // Waypoint arrival check
         if (distanceToTarget <= Math.max(stepDistance, 8.0) || targetSpeed == 0.0) {
@@ -212,10 +231,28 @@ public class SimulationEngine {
 
             drone.setLocation(nextLoc);
             drone.setHeadingDegrees(heading);
-            drone.setSpeed(targetSpeed);
+            drone.setSpeed(effectiveSpeed);
             drone.setStatus(targetWaypoint.getExpectedStatus());
             drone.setTotalDistanceTraveled(drone.getTotalDistanceTraveled() + stepDistance);
             drone.setTotalFlightTimeSeconds(drone.getTotalFlightTimeSeconds() + (long) deltaSeconds);
+
+            // In-flight restricted airspace breach detection
+            boolean inRestricted = geofenceService.isPointInRestrictedAirspace(nextLoc);
+            if (inRestricted && !drone.isRestrictedAirspaceBreach()) {
+                drone.setRestrictedAirspaceBreach(true);
+                telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
+                        "DANGER", "Airspace Incursion",
+                        "Drone " + drone.getCallsign() + " penetrated restricted airspace at (" + (int) nextLoc.getX() + ", " + (int) nextLoc.getY() + ")",
+                        drone.getId(), drone.getAssignedOrderId()
+                ));
+            } else if (!inRestricted && drone.isRestrictedAirspaceBreach()) {
+                drone.setRestrictedAirspaceBreach(false);
+                telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
+                        "INFO", "Airspace Clear",
+                        "Drone " + drone.getCallsign() + " exited restricted airspace",
+                        drone.getId(), drone.getAssignedOrderId()
+                ));
+            }
         }
 
         // Update battery percentage

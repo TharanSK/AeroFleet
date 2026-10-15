@@ -54,9 +54,17 @@ document.addEventListener('DOMContentLoaded', () => {
             ]);
             depots = await depotsRes.json();
             noFlyZones = await nfzRes.json();
+            renderZonesTab();
         } catch (e) {
             console.error('Error loading static map entities', e);
         }
+    }
+
+    // Cardinal Direction Converter
+    function getCardinalDirection(deg) {
+        const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "N"];
+        const idx = Math.round((((deg % 360) + 360) % 360) / 45.0);
+        return directions[Math.min(8, Math.max(0, idx))];
     }
 
     // Connect WebSocket via SockJS + STOMP
@@ -101,8 +109,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const s = String(secs % 60).padStart(2, '0');
         document.getElementById('top-sim-clock').textContent = `${hrs}:${mins}:${s}`;
 
-        document.getElementById('env-wind').textContent = `${snapshot.windSpeedMps.toFixed(1)} m/s`;
-        document.getElementById('env-condition').textContent = snapshot.weatherCondition;
+        const windSpeed = snapshot.windSpeedMps != null ? snapshot.windSpeedMps : 4.0;
+        const windDir = snapshot.windDirectionDeg != null ? snapshot.windDirectionDeg : 45.0;
+        const cardinal = getCardinalDirection(windDir);
+        const cond = snapshot.weatherCondition || 'CLEAR';
+
+        const compassEl = document.getElementById('env-wind-compass');
+        if (compassEl) {
+            compassEl.textContent = `${windSpeed.toFixed(1)} m/s @ ${Math.round(windDir)}° (${cardinal})`;
+        }
+        const condEl = document.getElementById('env-condition');
+        if (condEl) {
+            condEl.textContent = cond;
+            condEl.className = cond === 'STORM' ? 'font-semibold text-rose-400' : (cond === 'WINDY' ? 'font-semibold text-amber-400' : 'font-semibold text-emerald-400');
+        }
+
+        const dragBase = cond === 'STORM' ? 2.5 : (cond === 'RAIN' ? 1.5 : (cond === 'WINDY' ? 1.3 : 1.0));
+        const totalDrag = dragBase + (windSpeed / 20.0);
+        const dragBadge = document.getElementById('env-drag-badge');
+        if (dragBadge) {
+            dragBadge.textContent = `${totalDrag.toFixed(2)}x Drag`;
+            dragBadge.className = totalDrag > 2.0 ? 'font-mono text-[10px] bg-rose-950 text-rose-300 px-2 py-0.5 rounded border border-rose-800' : 'font-mono text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700';
+        }
 
         // Save positions for smooth lerp
         const now = Date.now();
@@ -201,30 +229,52 @@ document.addEventListener('DOMContentLoaded', () => {
             const cy = toScreenY(zone.centerY);
             const r = (zone.radius / GRID_WIDTH) * canvas.width;
 
-            // Fill
-            ctx.fillStyle = 'rgba(244, 63, 94, 0.12)';
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.fill();
+            if (zone.active) {
+                // Active restricted zone: Crimson danger ring
+                ctx.fillStyle = 'rgba(244, 63, 94, 0.14)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.fill();
 
-            // Dashed outline
-            ctx.strokeStyle = 'rgba(244, 63, 94, 0.7)';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([5, 4]);
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.setLineDash([]);
+                ctx.strokeStyle = '#f43f5e';
+                ctx.lineWidth = 1.8;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
 
-            // Label
-            ctx.fillStyle = '#fda4af';
-            ctx.font = 'bold 10px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(`⚠️ ${zone.name}`, cx, cy - 6);
-            ctx.font = '9px monospace';
-            ctx.fillStyle = '#f43f5e';
-            ctx.fillText(`Radius: ${zone.radius}u`, cx, cy + 8);
-            ctx.textAlign = 'left';
+                // Label
+                ctx.fillStyle = '#fda4af';
+                ctx.font = 'bold 10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`⚠️ ${zone.name}`, cx, cy - 6);
+                ctx.font = '9px monospace';
+                ctx.fillStyle = '#f43f5e';
+                ctx.fillText(`Radius: ${zone.radius}u (ACTIVE)`, cx, cy + 8);
+                ctx.textAlign = 'left';
+            } else {
+                // Inactive / Disabled zone: Muted Slate dashed ring
+                ctx.fillStyle = 'rgba(100, 116, 139, 0.05)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = '#64748b';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 5]);
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Label
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = 'italic 10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`⛔ [INACTIVE] ${zone.name}`, cx, cy - 5);
+                ctx.textAlign = 'left';
+            }
         });
     }
 
@@ -412,11 +462,17 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('mouse-coords').textContent = `Grid: (X: ${gx}, Y: ${gy})`;
     });
 
-    // Click on Blank Slate Grid to Dispatch Order
+    // Click on Blank Slate Grid to Dispatch Order or Place Zone
     canvas.addEventListener('click', (e) => {
         const rect = canvas.getBoundingClientRect();
         const gx = toGridX(e.clientX - rect.left);
         const gy = toGridY(e.clientY - rect.top);
+
+        if (zoneModal && !zoneModal.classList.contains('hidden')) {
+            document.getElementById('zone-x').value = gx;
+            document.getElementById('zone-y').value = gy;
+            return;
+        }
 
         document.getElementById('cust-x').value = gx;
         document.getElementById('cust-y').value = gy;
@@ -619,6 +675,85 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('log-feed').innerHTML = '';
     };
 
+    // Refresh No-Fly Zones from API
+    async function refreshZones() {
+        try {
+            const res = await fetch('/api/v1/geofence');
+            noFlyZones = await res.json();
+            renderZonesTab();
+        } catch (e) {
+            console.error('Error refreshing zones', e);
+        }
+    }
+
+    // Render No-Fly Zones in Sidebar Tab
+    function renderZonesTab() {
+        const container = document.getElementById('zone-list-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!noFlyZones || noFlyZones.length === 0) {
+            container.innerHTML = '<div class="text-center py-8 text-slate-500 text-xs">No restricted zones established.</div>';
+            return;
+        }
+
+        noFlyZones.forEach(z => {
+            const card = document.createElement('div');
+            card.className = 'p-3 rounded-xl bg-slate-950/80 border ' + 
+                (z.active ? 'border-rose-900/60 shadow-rose-950/20' : 'border-slate-800') + 
+                ' space-y-2 text-xs shadow-md transition';
+
+            const statusBadge = z.active
+                ? '<span class="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-rose-950 text-rose-300 border border-rose-800">ACTIVE</span>'
+                : '<span class="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700">DISABLED</span>';
+
+            card.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full ${z.active ? 'bg-rose-500 animate-pulse' : 'bg-slate-600'}"></span>
+                        <span class="font-bold text-slate-100">${z.name}</span>
+                    </div>
+                    ${statusBadge}
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-[11px] bg-slate-900/60 p-2 rounded-lg text-slate-300">
+                    <div>
+                        <div class="text-[9px] text-slate-500 uppercase">Center (X, Y)</div>
+                        <div class="font-mono text-cyan-300 font-semibold">${Math.round(z.centerX)}, ${Math.round(z.centerY)}</div>
+                    </div>
+                    <div>
+                        <div class="text-[9px] text-slate-500 uppercase">Radius</div>
+                        <div class="font-mono text-rose-400 font-semibold">${Math.round(z.radius)} units</div>
+                    </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-1 border-t border-slate-900 text-[11px]">
+                    <button class="btn-toggle-zone px-2.5 py-1 rounded ${z.active ? 'bg-amber-950/60 text-amber-300 border-amber-800/80 hover:bg-amber-900' : 'bg-emerald-950/60 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900'} border transition" data-id="${z.id}">
+                        ${z.active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    <button class="btn-delete-zone px-2.5 py-1 rounded bg-slate-800 text-rose-400 hover:bg-rose-950 hover:text-rose-200 border border-slate-700 transition" data-id="${z.id}">
+                        Delete
+                    </button>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+
+        document.querySelectorAll('.btn-toggle-zone').forEach(btn => {
+            btn.onclick = async () => {
+                await fetch(`/api/v1/geofence/${btn.dataset.id}/toggle`, { method: 'PUT' });
+                refreshZones();
+            };
+        });
+
+        document.querySelectorAll('.btn-delete-zone').forEach(btn => {
+            btn.onclick = async () => {
+                await fetch(`/api/v1/geofence/${btn.dataset.id}`, { method: 'DELETE' });
+                refreshZones();
+            };
+        });
+
+        lucide.createIcons();
+    }
+
     // Tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.onclick = () => {
@@ -634,7 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     });
 
-    // Modal
+    // Modal: Dispatch Order
     const modal = document.getElementById('order-modal');
     function openModal() { modal.classList.remove('hidden'); }
     function closeModal() { modal.classList.add('hidden'); }
@@ -665,6 +800,126 @@ document.addEventListener('DOMContentLoaded', () => {
             refreshOrders();
         }
     };
+
+    // Modal: Define No-Fly Zone
+    const zoneModal = document.getElementById('zone-modal');
+    function openZoneModal() { 
+        if (zoneModal) {
+            zoneModal.classList.remove('hidden'); 
+            lucide.createIcons();
+        }
+    }
+    function closeZoneModal() { if (zoneModal) zoneModal.classList.add('hidden'); }
+
+    const btnOpenZoneModal = document.getElementById('btn-open-zone-modal');
+    if (btnOpenZoneModal) btnOpenZoneModal.onclick = openZoneModal;
+    const btnQuickAddZone = document.getElementById('btn-quick-add-zone');
+    if (btnQuickAddZone) btnQuickAddZone.onclick = openZoneModal;
+    const btnCloseZoneModal = document.getElementById('btn-close-zone-modal');
+    if (btnCloseZoneModal) btnCloseZoneModal.onclick = closeZoneModal;
+    const btnCancelZoneModal = document.getElementById('btn-cancel-zone-modal');
+    if (btnCancelZoneModal) btnCancelZoneModal.onclick = closeZoneModal;
+
+    document.querySelectorAll('.zone-preset-chip').forEach(chip => {
+        chip.onclick = () => {
+            document.getElementById('zone-name').value = chip.dataset.name;
+            document.getElementById('zone-radius').value = chip.dataset.r;
+        };
+    });
+
+    const zoneForm = document.getElementById('zone-form');
+    if (zoneForm) {
+        zoneForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const payload = {
+                name: document.getElementById('zone-name').value,
+                centerX: parseFloat(document.getElementById('zone-x').value),
+                centerY: parseFloat(document.getElementById('zone-y').value),
+                radius: parseFloat(document.getElementById('zone-radius').value),
+                active: document.getElementById('zone-active').checked
+            };
+
+            const res = await fetch('/api/v1/geofence', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                closeZoneModal();
+                refreshZones();
+            }
+        };
+    }
+
+    // Modal: Atmosphere & Environment Controls
+    const envModal = document.getElementById('env-modal');
+    function openEnvModal() { 
+        if (envModal) {
+            envModal.classList.remove('hidden'); 
+            lucide.createIcons();
+            updateEnvEstimate();
+        }
+    }
+    function closeEnvModal() { if (envModal) envModal.classList.add('hidden'); }
+
+    const btnOpenEnvModal = document.getElementById('btn-open-env-modal');
+    if (btnOpenEnvModal) btnOpenEnvModal.onclick = openEnvModal;
+    const btnCloseEnvModal = document.getElementById('btn-close-env-modal');
+    if (btnCloseEnvModal) btnCloseEnvModal.onclick = closeEnvModal;
+    const btnCancelEnvModal = document.getElementById('btn-cancel-env-modal');
+    if (btnCancelEnvModal) btnCancelEnvModal.onclick = closeEnvModal;
+
+    let selectedWeather = 'CLEAR';
+    const sliderWindSpeed = document.getElementById('slider-wind-speed');
+    const sliderWindDir = document.getElementById('slider-wind-dir');
+    const envWindVal = document.getElementById('env-wind-val');
+    const envDirVal = document.getElementById('env-dir-val');
+    const envDragEstimate = document.getElementById('env-drag-estimate');
+
+    function updateEnvEstimate() {
+        if (!sliderWindSpeed || !sliderWindDir) return;
+        const speed = parseFloat(sliderWindSpeed.value);
+        const dir = parseFloat(sliderWindDir.value);
+        const card = getCardinalDirection(dir);
+        if (envWindVal) envWindVal.textContent = `${speed.toFixed(1)} m/s`;
+        if (envDirVal) envDirVal.textContent = `${Math.round(dir)}° (${card})`;
+
+        const dragBase = selectedWeather === 'STORM' ? 2.5 : (selectedWeather === 'RAIN' ? 1.5 : (selectedWeather === 'WINDY' ? 1.3 : 1.0));
+        const estDrag = dragBase + (speed / 20.0);
+        if (envDragEstimate) envDragEstimate.textContent = `${estDrag.toFixed(2)}x`;
+    }
+
+    if (sliderWindSpeed) sliderWindSpeed.oninput = updateEnvEstimate;
+    if (sliderWindDir) sliderWindDir.oninput = updateEnvEstimate;
+
+    document.querySelectorAll('.env-preset-btn').forEach(btn => {
+        btn.onclick = () => {
+            selectedWeather = btn.dataset.weather;
+            if (sliderWindSpeed && btn.dataset.wind) sliderWindSpeed.value = btn.dataset.wind;
+            if (sliderWindDir && btn.dataset.dir) sliderWindDir.value = btn.dataset.dir;
+            updateEnvEstimate();
+        };
+    });
+
+    const btnApplyEnv = document.getElementById('btn-apply-env');
+    if (btnApplyEnv) {
+        btnApplyEnv.onclick = async () => {
+            const speed = parseFloat(sliderWindSpeed.value);
+            const dir = parseFloat(sliderWindDir.value);
+            await fetch('/api/v1/simulation/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    weatherCondition: selectedWeather,
+                    windSpeedMps: speed,
+                    windDirectionDeg: dir
+                })
+            });
+            document.getElementById('weather-select').value = selectedWeather;
+            closeEnvModal();
+        };
+    }
 
     // Initialize
     loadStaticEntities();

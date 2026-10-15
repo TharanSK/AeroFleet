@@ -53,27 +53,54 @@ public class SimulationController {
             simulationEngine.setSpeedMultiplier(control.getSpeedMultiplier());
         }
 
+        boolean envChanged = false;
         if (control.getWeatherCondition() != null) {
             try {
                 WeatherCondition condition = WeatherCondition.valueOf(control.getWeatherCondition().toUpperCase());
                 weatherService.setCondition(condition);
-                if (condition == WeatherCondition.STORM) {
-                    weatherService.setWindSpeedMps(18.0);
-                } else if (condition == WeatherCondition.WINDY) {
-                    weatherService.setWindSpeedMps(10.0);
-                } else {
-                    weatherService.setWindSpeedMps(4.0);
+                if (control.getWindSpeedMps() == null) {
+                    if (condition == WeatherCondition.STORM) {
+                        weatherService.setWindSpeedMps(18.0);
+                    } else if (condition == WeatherCondition.WINDY) {
+                        weatherService.setWindSpeedMps(10.0);
+                    } else {
+                        weatherService.setWindSpeedMps(4.0);
+                    }
                 }
-                telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
-                        condition == WeatherCondition.STORM ? "DANGER" : "WARN",
-                        "Weather Updated",
-                        "Atmospheric condition updated to " + condition.name() + " (" + condition.getDescription() + ")",
-                        null, null
-                ));
+                envChanged = true;
             } catch (IllegalArgumentException ignored) {}
         }
 
+        if (control.getWindSpeedMps() != null) {
+            weatherService.setWindSpeedMps(control.getWindSpeedMps());
+            envChanged = true;
+        }
+
+        if (control.getWindDirectionDeg() != null) {
+            weatherService.setWindDirectionDeg(control.getWindDirectionDeg());
+            envChanged = true;
+        }
+
+        if (envChanged) {
+            WeatherCondition condition = weatherService.getCondition();
+            double speed = weatherService.getWindSpeedMps();
+            double dir = weatherService.getWindDirectionDeg();
+            String cardinal = getCardinalDirection(dir);
+            telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
+                    condition == WeatherCondition.STORM ? "DANGER" : (speed > 12.0 ? "WARN" : "INFO"),
+                    "Atmosphere Updated",
+                    String.format("Weather: %s | Wind: %.1f m/s @ %.0f° (%s)", condition.name(), speed, dir, cardinal),
+                    null, null
+            ));
+        }
+
         return ResponseEntity.ok("Simulation control updated successfully");
+    }
+
+    private String getCardinalDirection(double deg) {
+        String[] directions = {"N", "NE", "E", "SE", "S", "SW", "W", "NW", "N"};
+        int idx = (int) Math.round(((deg % 360.0) / 45.0));
+        return directions[Math.max(0, Math.min(8, idx))];
     }
 
     @PostMapping("/incident")

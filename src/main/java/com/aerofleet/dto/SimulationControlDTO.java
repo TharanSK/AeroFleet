@@ -4,6 +4,8 @@ public class SimulationControlDTO {
     private Boolean running;
     private Double speedMultiplier;
     private String weatherCondition; // CLEAR, WINDY, RAIN, STORM
+    private Double windSpeedMps;
+    private Double windDirectionDeg;
 
     public SimulationControlDTO() {
     }
@@ -30,5 +32,21 @@ public class SimulationControlDTO {
 
     public void setWeatherCondition(String weatherCondition) {
         this.weatherCondition = weatherCondition;
+    }
+
+    public Double getWindSpeedMps() {
+        return windSpeedMps;
+    }
+
+    public void setWindSpeedMps(Double windSpeedMps) {
+        this.windSpeedMps = windSpeedMps;
+    }
+
+    public Double getWindDirectionDeg() {
+        return windDirectionDeg;
+    }
+
+    public void setWindDirectionDeg(Double windDirectionDeg) {
+        this.windDirectionDeg = windDirectionDeg;
     }
 }

@@ -52,6 +52,9 @@ public class Drone {
     @Transient
     private int currentWaypointIndex = 0;
 
+    @Transient
+    private boolean restrictedAirspaceBreach = false;
+
     public Drone() {
         this.status = DroneStatus.IDLE;
         this.batteryPercent = 100.0;
@@ -240,5 +243,13 @@ public class Drone {
 
     public void setCurrentWaypointIndex(int currentWaypointIndex) {
         this.currentWaypointIndex = currentWaypointIndex;
+    }
+
+    public boolean isRestrictedAirspaceBreach() {
+        return restrictedAirspaceBreach;
+    }
+
+    public void setRestrictedAirspaceBreach(boolean restrictedAirspaceBreach) {
+        this.restrictedAirspaceBreach = restrictedAirspaceBreach;
     }
 }

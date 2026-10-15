@@ -34,4 +34,12 @@ public class NoFlyZoneTest {
         Location safeEast = new Location(500.0, 200.0);
         assertFalse(zone.intersectsPath(safeWest, safeEast), "Clear path outside radius must not intersect");
     }
+
+    @Test
+    public void testInactiveZoneDoesNotViolate() {
+        NoFlyZone zone = new NoFlyZone(2L, "Temporary Construction Zone", 400.0, 300.0, 50.0, false);
+        Location inside = new Location(410.0, 310.0);
+        assertFalse(zone.violatesZone(inside), "Deactivated zone must not trigger violation");
+        assertFalse(zone.intersectsPath(new Location(300.0, 300.0), new Location(500.0, 300.0)), "Deactivated zone must not block path");
+    }
 }
