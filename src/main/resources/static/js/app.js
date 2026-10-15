@@ -1,104 +1,61 @@
 document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
 
-    // Map State
-    let map = null;
-    let depotMarkers = {};
-    let droneMarkers = {};
-    let dronePaths = {};
-    let nfzCircles = [];
+    // Canvas & Context
+    const canvas = document.getElementById('gridCanvas');
+    const ctx = canvas.getContext('2d');
 
-    // Telemetry & UI State
+    // Simulation Dimensions
+    const GRID_WIDTH = 800;
+    const GRID_HEIGHT = 600;
+
+    // Simulation & UI State
     let isRunning = true;
     let stompClient = null;
+    let depots = [];
+    let noFlyZones = [];
+    let drones = [];
     let allOrders = [];
 
-    // Initialize Leaflet Map
-    function initMap() {
-        map = L.map('map', {
-            zoomControl: false,
-            attributionControl: false
-        }).setView([37.7749, -122.4194], 13);
+    // Interpolation state for 60FPS smooth flight
+    let lastDronePositions = {};
+    let targetDronePositions = {};
+    let lastSnapshotTime = Date.now();
 
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
+    // Resize canvas properly
+    function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 18,
-            subdomains: ['a', 'b', 'c']
-        }).addTo(map);
-
-        // Map Click to capture destination coordinates
-        map.on('click', (e) => {
-            const lat = e.latlng.lat.toFixed(4);
-            const lng = e.latlng.lng.toFixed(4);
-            document.getElementById('cust-lat').value = lat;
-            document.getElementById('cust-lon').value = lng;
-            openModal();
-        });
-
-        loadDepots();
-        loadNoFlyZones();
+    // Coordinate conversion: from [0, 800] x [0, 600] to Screen Canvas pixels
+    function toScreenX(x) {
+        return (x / GRID_WIDTH) * canvas.width;
+    }
+    function toScreenY(y) {
+        return (y / GRID_HEIGHT) * canvas.height;
+    }
+    function toGridX(screenX) {
+        return Math.round((screenX / canvas.width) * GRID_WIDTH);
+    }
+    function toGridY(screenY) {
+        return Math.round((screenY / canvas.height) * GRID_HEIGHT);
     }
 
-    // Load Depots from REST API
-    async function loadDepots() {
+    // Load Depots & NoFlyZones from REST APIs
+    async function loadStaticEntities() {
         try {
-            const res = await fetch('/api/v1/depots');
-            const depots = await res.json();
-            depots.forEach(depot => {
-                const depotIcon = L.divIcon({
-                    className: 'depot-marker',
-                    html: `<div class="p-1.5 flex items-center justify-center font-bold text-[10px]">🏠</div>`,
-                    iconSize: [28, 28],
-                    iconAnchor: [14, 14]
-                });
-
-                const marker = L.marker([depot.latitude, depot.longitude], { icon: depotIcon }).addTo(map);
-                marker.bindPopup(`
-                    <div class="p-2 space-y-1">
-                        <div class="font-bold text-cyan-400 text-xs">${depot.name}</div>
-                        <div class="text-[11px] text-slate-400">Pads: ${depot.chargingPadsTotal} Total</div>
-                        <div class="text-[11px] text-slate-400">Elevation: ${depot.elevationMeters}m</div>
-                    </div>
-                `, { className: 'custom-popup' });
-
-                depotMarkers[depot.id] = marker;
-            });
-        } catch (err) {
-            console.error('Failed to load depots', err);
-        }
-    }
-
-    // Load NoFlyZones from REST API
-    async function loadNoFlyZones() {
-        try {
-            const res = await fetch('/api/v1/geofence');
-            const zones = await res.json();
-            zones.forEach(zone => {
-                const circle = L.circle([zone.centerLatitude, zone.centerLongitude], {
-                    color: '#f43f5e',
-                    fillColor: '#f43f5e',
-                    fillOpacity: 0.15,
-                    weight: 2,
-                    dashArray: '5, 5',
-                    radius: zone.radiusMeters,
-                    className: 'pulse-circle'
-                }).addTo(map);
-
-                circle.bindPopup(`
-                    <div class="p-2 space-y-1">
-                        <div class="font-bold text-rose-400 text-xs flex items-center gap-1">
-                            ⚠️ RESTRICTED AIRSPACE
-                        </div>
-                        <div class="text-[11px] font-semibold text-slate-200">${zone.name}</div>
-                        <div class="text-[10px] text-slate-400">Radius: ${zone.radiusMeters}m | Ceiling: ${zone.maxAltitudeMeters}m</div>
-                    </div>
-                `, { className: 'custom-popup' });
-
-                nfzCircles.push(circle);
-            });
-        } catch (err) {
-            console.error('Failed to load NoFlyZones', err);
+            const [depotsRes, nfzRes] = await Promise.all([
+                fetch('/api/v1/depots'),
+                fetch('/api/v1/geofence')
+            ]);
+            depots = await depotsRes.json();
+            noFlyZones = await nfzRes.json();
+        } catch (e) {
+            console.error('Error loading static map entities', e);
         }
     }
 
@@ -106,36 +63,31 @@ document.addEventListener('DOMContentLoaded', () => {
     function initWebSocket() {
         const socket = new SockJS('/ws');
         stompClient = Stomp.over(socket);
-        stompClient.debug = null; // Disable debug noise
+        stompClient.debug = null;
 
         stompClient.connect({}, () => {
-            addLogEntry('SUCCESS', 'Telemetry Link Online', 'Connected to AeroFleet STOMP Message Broker');
+            addLogEntry('SUCCESS', 'Telemetry Online', 'Connected to AeroFleet STOMP Broker');
 
-            // Subscribe to Telemetry Snapshot
-            stompClient.subscribe('/topic/telemetry', (message) => {
-                const snapshot = JSON.parse(message.body);
+            stompClient.subscribe('/topic/telemetry', (msg) => {
+                const snapshot = JSON.parse(msg.body);
                 handleTelemetrySnapshot(snapshot);
             });
 
-            // Subscribe to Airspace Alerts
-            stompClient.subscribe('/topic/alerts', (message) => {
-                const alert = JSON.parse(message.body);
+            stompClient.subscribe('/topic/alerts', (msg) => {
+                const alert = JSON.parse(msg.body);
                 addLogEntry(alert.level, alert.title, alert.message);
             });
 
-            // Subscribe to Order Updates
             stompClient.subscribe('/topic/orders', () => {
                 refreshOrders();
             });
-        }, (err) => {
-            addLogEntry('DANGER', 'Telemetry Error', 'Connection failed, retrying in 4s...');
+        }, () => {
+            addLogEntry('DANGER', 'Disconnected', 'Retrying connection in 4s...');
             setTimeout(initWebSocket, 4000);
         });
     }
 
-    // Process Incoming Telemetry
     function handleTelemetrySnapshot(snapshot) {
-        // Update Header Stats
         isRunning = snapshot.simulationRunning;
         document.getElementById('top-sim-status').textContent = isRunning ? 'ACTIVE' : 'PAUSED';
         document.getElementById('top-sim-status').className = isRunning ? 'font-semibold text-emerald-400' : 'font-semibold text-amber-400';
@@ -143,85 +95,341 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('top-inflight-count').textContent = snapshot.activeDeliveries;
         document.getElementById('top-delivered-count').textContent = snapshot.completedOrders;
 
-        // Sim Clock Formatter (seconds to HH:MM:SS)
         const secs = snapshot.simTimeElapsedSeconds || 0;
         const hrs = String(Math.floor(secs / 3600)).padStart(2, '0');
         const mins = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
         const s = String(secs % 60).padStart(2, '0');
         document.getElementById('top-sim-clock').textContent = `${hrs}:${mins}:${s}`;
 
-        // Environmental Info
-        document.getElementById('env-wind').textContent = `${snapshot.windSpeedMps.toFixed(1)} m/s @ ${snapshot.windDirectionDeg.toFixed(0)}°`;
+        document.getElementById('env-wind').textContent = `${snapshot.windSpeedMps.toFixed(1)} m/s`;
         document.getElementById('env-condition').textContent = snapshot.weatherCondition;
 
-        // Render Drones on Map & Sidebar
-        renderDrones(snapshot.drones);
+        // Save positions for smooth lerp
+        const now = Date.now();
+        snapshot.drones.forEach(d => {
+            if (targetDronePositions[d.droneId]) {
+                lastDronePositions[d.droneId] = {
+                    x: targetDronePositions[d.droneId].x,
+                    y: targetDronePositions[d.droneId].y
+                };
+            } else {
+                lastDronePositions[d.droneId] = { x: d.x, y: d.y };
+            }
+            targetDronePositions[d.droneId] = { x: d.x, y: d.y };
+        });
+        lastSnapshotTime = now;
+
+        drones = snapshot.drones;
+        renderDroneCards(drones);
     }
 
-    function renderDrones(drones) {
+    // 60FPS Canvas Render Loop
+    function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. Draw Background Grid
+        drawGrid();
+
+        // 2. Draw No-Fly Zones
+        drawNoFlyZones();
+
+        // 3. Draw Charging Hubs / Depots
+        drawDepots();
+
+        // 4. Draw Flight Paths & Destination Pins
+        drawFlightPaths();
+
+        // 5. Draw Drones with spinning rotors
+        drawDrones();
+
+        requestAnimationFrame(render);
+    }
+
+    function drawGrid() {
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // Dark radar background
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(0, 0, w, h);
+
+        // Grid lines every 50 units
+        ctx.lineWidth = 1;
+        for (let gx = 0; gx <= GRID_WIDTH; gx += 50) {
+            const sx = toScreenX(gx);
+            ctx.strokeStyle = (gx % 100 === 0) ? '#1e293b' : '#141c2e';
+            ctx.beginPath();
+            ctx.moveTo(sx, 0);
+            ctx.lineTo(sx, h);
+            ctx.stroke();
+
+            // Coordinate labels along top
+            if (gx % 100 === 0 && gx > 0 && gx < GRID_WIDTH) {
+                ctx.fillStyle = '#475569';
+                ctx.font = '10px monospace';
+                ctx.fillText(`X:${gx}`, sx + 3, 15);
+            }
+        }
+
+        for (let gy = 0; gy <= GRID_HEIGHT; gy += 50) {
+            const sy = toScreenY(gy);
+            ctx.strokeStyle = (gy % 100 === 0) ? '#1e293b' : '#141c2e';
+            ctx.beginPath();
+            ctx.moveTo(0, sy);
+            ctx.lineTo(w, sy);
+            ctx.stroke();
+
+            // Coordinate labels along left
+            if (gy % 100 === 0 && gy > 0 && gy < GRID_HEIGHT) {
+                ctx.fillStyle = '#475569';
+                ctx.font = '10px monospace';
+                ctx.fillText(`Y:${gy}`, 6, sy - 4);
+            }
+        }
+
+        // Airspace Sector Labels
+        ctx.fillStyle = '#334155';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText('SECTOR A-1 [WEST]', toScreenX(40), toScreenY(40));
+        ctx.fillText('CENTRAL AIRSPACE [GRID 400x300]', toScreenX(320), toScreenY(40));
+        ctx.fillText('SECTOR B-2 [EAST]', toScreenX(680), toScreenY(40));
+    }
+
+    function drawNoFlyZones() {
+        noFlyZones.forEach(zone => {
+            const cx = toScreenX(zone.centerX);
+            const cy = toScreenY(zone.centerY);
+            const r = (zone.radius / GRID_WIDTH) * canvas.width;
+
+            // Fill
+            ctx.fillStyle = 'rgba(244, 63, 94, 0.12)';
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Dashed outline
+            ctx.strokeStyle = 'rgba(244, 63, 94, 0.7)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Label
+            ctx.fillStyle = '#fda4af';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`⚠️ ${zone.name}`, cx, cy - 6);
+            ctx.font = '9px monospace';
+            ctx.fillStyle = '#f43f5e';
+            ctx.fillText(`Radius: ${zone.radius}u`, cx, cy + 8);
+            ctx.textAlign = 'left';
+        });
+    }
+
+    function drawDepots() {
+        depots.forEach(depot => {
+            const x = toScreenX(depot.x);
+            const y = toScreenY(depot.y);
+            const size = 32;
+
+            // Hub Base Box
+            ctx.fillStyle = '#0284c7';
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            ctx.roundRect(x - size/2, y - size/2, size, size, 6);
+            ctx.fill();
+            ctx.stroke();
+
+            // Hub Icon
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('HUB', x, y + 4);
+
+            // Hub Name & Pads Info
+            ctx.fillStyle = '#7dd3fc';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillText(depot.name, x, y - size/2 - 5);
+
+            ctx.fillStyle = '#a7f3d0';
+            ctx.font = '9px monospace';
+            const freePads = depot.chargingPadsTotal - depot.chargingPadsOccupied;
+            ctx.fillText(`${freePads}/${depot.chargingPadsTotal} Free`, x, y + size/2 + 12);
+            ctx.textAlign = 'left';
+        });
+    }
+
+    function drawFlightPaths() {
+        drones.forEach(d => {
+            const isFlying = d.status !== 'IDLE' && d.status !== 'CHARGING' && d.status !== 'MAINTENANCE';
+            if (isFlying && d.targetX != null && d.targetY != null) {
+                const sx = toScreenX(d.x);
+                const sy = toScreenY(d.y);
+                const tx = toScreenX(d.targetX);
+                const ty = toScreenY(d.targetY);
+
+                // Flight path line
+                ctx.strokeStyle = getStatusColor(d.status);
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                ctx.lineTo(tx, ty);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Target Destination Pin
+                ctx.fillStyle = '#f43f5e';
+                ctx.beginPath();
+                ctx.arc(tx, ty, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                ctx.fillStyle = '#fbcfe8';
+                ctx.font = 'bold 9px monospace';
+                ctx.fillText(`Target (${Math.round(d.targetX)}, ${Math.round(d.targetY)})`, tx + 7, ty - 3);
+            }
+        });
+    }
+
+    function drawDrones() {
+        const timeFraction = Math.min(1.0, (Date.now() - lastSnapshotTime) / 1000.0);
+        const rotorAngle = (Date.now() / 35) % (Math.PI * 2);
+
+        drones.forEach(drone => {
+            // Smooth position interpolation
+            let curX = drone.x;
+            let curY = drone.y;
+            if (lastDronePositions[drone.droneId] && targetDronePositions[drone.droneId]) {
+                const lx = lastDronePositions[drone.droneId].x;
+                const ly = lastDronePositions[drone.droneId].y;
+                const tx = targetDronePositions[drone.droneId].x;
+                const ty = targetDronePositions[drone.droneId].y;
+                curX = lx + (tx - lx) * timeFraction;
+                curY = ly + (ty - ly) * timeFraction;
+            }
+
+            const x = toScreenX(curX);
+            const y = toScreenY(curY);
+            const color = getStatusColor(drone.status);
+            const isFlying = drone.status !== 'IDLE' && drone.status !== 'CHARGING';
+
+            // Rotor arms (Cross)
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x - 12, y - 12);
+            ctx.lineTo(x + 12, y + 12);
+            ctx.moveTo(x - 12, y + 12);
+            ctx.lineTo(x + 12, y - 12);
+            ctx.stroke();
+
+            // 4 Rotors
+            const rotorOffsets = [
+                [-12, -12], [12, -12], [-12, 12], [12, 12]
+            ];
+            rotorOffsets.forEach(([ox, oy]) => {
+                ctx.strokeStyle = isFlying ? '#38bdf8' : '#94a3b8';
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.arc(x + ox, y + oy, 4.5, 0, Math.PI * 2);
+                ctx.stroke();
+
+                if (isFlying) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + ox + Math.cos(rotorAngle) * 4.5, y + oy + Math.sin(rotorAngle) * 4.5);
+                    ctx.lineTo(x + ox - Math.cos(rotorAngle) * 4.5, y + oy - Math.sin(rotorAngle) * 4.5);
+                    ctx.stroke();
+                }
+            });
+
+            // Center Drone Body
+            ctx.fillStyle = '#0f172a';
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.arc(x, y, 7.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Direction arrow if moving
+            if (isFlying) {
+                const rad = Math.toRadians ? Math.toRadians(drone.headingDegrees) : (drone.headingDegrees * Math.PI / 180);
+                const hx = x + Math.cos(rad) * 12;
+                const hy = y + Math.sin(rad) * 12;
+                ctx.strokeStyle = '#fbbf24';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(hx, hy);
+                ctx.stroke();
+            }
+
+            // Callsign Label
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(drone.callsign, x, y - 16);
+
+            // Mini Battery Bar
+            const barW = 24;
+            const barH = 3;
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(x - barW/2, y + 15, barW, barH);
+
+            ctx.fillStyle = drone.batteryPercent < 25 ? '#f43f5e' : (drone.batteryPercent < 50 ? '#f59e0b' : '#10b981');
+            ctx.fillRect(x - barW/2, y + 15, (drone.batteryPercent / 100.0) * barW, barH);
+
+            ctx.textAlign = 'left';
+        });
+    }
+
+    function getStatusColor(status) {
+        switch (status) {
+            case 'IDLE': return '#94a3b8';
+            case 'CHARGING': return '#38bdf8';
+            case 'ASSIGNED': return '#818cf8';
+            case 'EN_ROUTE_DELIVERY': return '#10b981';
+            case 'DELIVERING': return '#f59e0b';
+            case 'RETURNING': return '#38bdf8';
+            case 'LANDING': return '#a78bfa';
+            case 'EMERGENCY_RTH': return '#f43f5e';
+            default: return '#64748b';
+        }
+    }
+
+    // Mouse Tracking on Grid
+    canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const gx = toGridX(e.clientX - rect.left);
+        const gy = toGridY(e.clientY - rect.top);
+        document.getElementById('mouse-coords').textContent = `Grid: (X: ${gx}, Y: ${gy})`;
+    });
+
+    // Click on Blank Slate Grid to Dispatch Order
+    canvas.addEventListener('click', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const gx = toGridX(e.clientX - rect.left);
+        const gy = toGridY(e.clientY - rect.top);
+
+        document.getElementById('cust-x').value = gx;
+        document.getElementById('cust-y').value = gy;
+        openModal();
+    });
+
+    // Sidebar Drone Telemetry Cards
+    function renderDroneCards(drones) {
         const cardContainer = document.getElementById('drone-card-container');
         cardContainer.innerHTML = '';
 
         drones.forEach(drone => {
-            const isFlying = drone.status !== 'IDLE' && drone.status !== 'CHARGING' && drone.status !== 'MAINTENANCE';
             const statusColor = getStatusColor(drone.status);
-
-            // Update or Create Map Marker
-            const droneHtml = `
-                <div class="relative flex items-center justify-center transform drone-marker" style="transform: rotate(${drone.headingDegrees}deg);">
-                    <div class="w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2" 
-                         style="background: #0f172a; border-color: ${statusColor};">
-                        <span class="text-xs">🚁</span>
-                    </div>
-                </div>
-            `;
-
-            const customIcon = L.divIcon({
-                className: 'drone-icon-wrap',
-                html: droneHtml,
-                iconSize: [28, 28],
-                iconAnchor: [14, 14]
-            });
-
-            if (droneMarkers[drone.droneId]) {
-                droneMarkers[drone.droneId].setLatLng([drone.latitude, drone.longitude]);
-                droneMarkers[drone.droneId].setIcon(customIcon);
-            } else {
-                const marker = L.marker([drone.latitude, drone.longitude], { icon: customIcon }).addTo(map);
-                marker.bindPopup(`
-                    <div class="p-2 space-y-1 text-xs">
-                        <div class="font-bold text-cyan-400">${drone.callsign}</div>
-                        <div class="text-[11px] text-slate-300">Model: ${drone.modelType}</div>
-                        <div class="text-[11px] text-slate-300">Status: <span class="font-semibold" style="color: ${statusColor};">${drone.status}</span></div>
-                        <div class="text-[11px] text-slate-400">Battery: ${drone.batteryPercent.toFixed(1)}%</div>
-                        <div class="text-[11px] text-slate-400">Altitude: ${drone.altitudeMeters.toFixed(1)}m | Speed: ${drone.speedMps.toFixed(1)}m/s</div>
-                    </div>
-                `, { className: 'custom-popup' });
-                droneMarkers[drone.droneId] = marker;
-            }
-
-            // Draw or update flight path polyline
-            if (isFlying && drone.targetLat && drone.targetLon) {
-                const pathCoords = [
-                    [drone.latitude, drone.longitude],
-                    [drone.targetLat, drone.targetLon]
-                ];
-                if (dronePaths[drone.droneId]) {
-                    dronePaths[drone.droneId].setLatLngs(pathCoords);
-                } else {
-                    dronePaths[drone.droneId] = L.polyline(pathCoords, {
-                        color: statusColor,
-                        weight: 2,
-                        dashArray: '4, 6',
-                        opacity: 0.8
-                    }).addTo(map);
-                }
-            } else if (dronePaths[drone.droneId]) {
-                map.removeLayer(dronePaths[drone.droneId]);
-                delete dronePaths[drone.droneId];
-            }
-
-            // Build Sidebar Drone Card
             const card = document.createElement('div');
             card.className = 'bg-slate-950/80 border border-slate-800 rounded-xl p-3 shadow-md hover:border-slate-700 transition space-y-2.5';
             card.innerHTML = `
@@ -250,15 +458,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
 
-                <!-- Metrics Grid -->
+                <!-- Coordinates & Cargo Grid -->
                 <div class="grid grid-cols-3 gap-1 text-[11px] bg-slate-900/60 p-2 rounded-lg text-slate-300">
                     <div>
-                        <div class="text-[9px] text-slate-500 uppercase">Alt</div>
-                        <div class="font-mono font-semibold text-cyan-300">${drone.altitudeMeters.toFixed(0)}m</div>
+                        <div class="text-[9px] text-slate-500 uppercase">Pos (X,Y)</div>
+                        <div class="font-mono font-semibold text-cyan-300">${Math.round(drone.x)}, ${Math.round(drone.y)}</div>
                     </div>
                     <div>
                         <div class="text-[9px] text-slate-500 uppercase">Speed</div>
-                        <div class="font-mono font-semibold text-emerald-300">${drone.speedMps.toFixed(1)}m/s</div>
+                        <div class="font-mono font-semibold text-emerald-300">${drone.speed.toFixed(0)}u/s</div>
                     </div>
                     <div>
                         <div class="text-[9px] text-slate-500 uppercase">Cargo</div>
@@ -279,30 +487,12 @@ document.addEventListener('DOMContentLoaded', () => {
             cardContainer.appendChild(card);
         });
 
-        // Attach action events to card buttons
         document.querySelectorAll('.btn-recall').forEach(btn => {
-            btn.onclick = () => recallDrone(btn.dataset.id);
+            btn.onclick = () => fetch(`/api/v1/drones/${btn.dataset.id}/recall`, { method: 'POST' });
         });
         document.querySelectorAll('.btn-drain').forEach(btn => {
-            btn.onclick = () => injectDrain(btn.dataset.id);
+            btn.onclick = () => fetch(`/api/v1/simulation/incident?droneId=${btn.dataset.id}&type=BATTERY_DRAIN&magnitude=30`, { method: 'POST' });
         });
-    }
-
-    function getStatusColor(status) {
-        switch (status) {
-            case 'IDLE': return '#94a3b8';
-            case 'CHARGING': return '#38bdf8';
-            case 'ASSIGNED': return '#818cf8';
-            case 'TAKING_OFF': return '#34d399';
-            case 'EN_ROUTE_DELIVERY': return '#10b981';
-            case 'DESCENDING_DELIVERY': return '#facc15';
-            case 'DELIVERING': return '#f59e0b';
-            case 'ASCENDING_DELIVERY': return '#34d399';
-            case 'RETURNING': return '#38bdf8';
-            case 'LANDING': return '#a78bfa';
-            case 'EMERGENCY_RTH': return '#f43f5e';
-            default: return '#64748b';
-        }
     }
 
     // Refresh Orders Queue
@@ -328,7 +518,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="font-bold text-slate-200">${order.orderNumber}</span>
                         <span class="text-[10px] px-1.5 py-0.5 rounded font-mono ${badgeClass}">${order.status}</span>
                     </div>
-                    <div class="text-slate-400 text-[11px]">${order.customerName}</div>
+                    <div class="text-slate-400 text-[11px]">${order.customerName} @ (${Math.round(order.deliveryX)}, ${Math.round(order.deliveryY)})</div>
                     <div class="flex justify-between text-[10px] text-slate-500">
                         <span>Weight: ${order.packageWeightKg}kg</span>
                         <span>Priority: ${order.priority}</span>
@@ -379,16 +569,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Controls and Action Handlers
-    async function recallDrone(droneId) {
-        await fetch(`/api/v1/drones/${droneId}/recall`, { method: 'POST' });
-    }
-
-    async function injectDrain(droneId) {
-        await fetch(`/api/v1/simulation/incident?droneId=${droneId}&type=BATTERY_DRAIN&magnitude=30`, { method: 'POST' });
-    }
-
-    // UI Buttons
+    // Controls
     document.getElementById('btn-toggle-sim').onclick = async () => {
         isRunning = !isRunning;
         await fetch('/api/v1/simulation/control', {
@@ -438,7 +619,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('log-feed').innerHTML = '';
     };
 
-    // Tabs
+    // Tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.onclick = () => {
             document.querySelectorAll('.tab-btn').forEach(b => {
@@ -466,8 +647,8 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const payload = {
             customerName: document.getElementById('cust-name').value,
-            deliveryLatitude: parseFloat(document.getElementById('cust-lat').value),
-            deliveryLongitude: parseFloat(document.getElementById('cust-lon').value),
+            deliveryX: parseFloat(document.getElementById('cust-x').value),
+            deliveryY: parseFloat(document.getElementById('cust-y').value),
             packageWeightKg: parseFloat(document.getElementById('cust-weight').value),
             priority: document.getElementById('cust-priority').value,
             originDepotId: 1
@@ -485,8 +666,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Initial Startup
-    initMap();
+    // Initialize
+    loadStaticEntities();
     initWebSocket();
     refreshOrders();
+    requestAnimationFrame(render);
 });

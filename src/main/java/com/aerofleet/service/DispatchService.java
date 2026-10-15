@@ -17,6 +17,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Intelligent Dispatch Engine: Matches pending orders to optimal drones on the grid.
+ * Demonstrates Collections, Stream API, and Greedy Scheduling.
+ */
 @Service
 public class DispatchService {
 
@@ -39,7 +43,7 @@ public class DispatchService {
     }
 
     /**
-     * Attempts to match all pending delivery orders with available, optimal drones.
+     * Scans FIFO order queue and assigns pending orders to available drones.
      */
     @Transactional
     public synchronized int dispatchPendingOrders() {
@@ -62,7 +66,7 @@ public class DispatchService {
                         .findFirst()
                         .orElse(allDepots.get(0));
 
-                // Generate full flight route
+                // Generate 2D route waypoints
                 List<Waypoint> route = routingService.buildDeliveryRoute(drone, depot, order);
 
                 drone.setWaypoints(route);
@@ -88,39 +92,33 @@ public class DispatchService {
     private Optional<Drone> findOptimalDrone(DeliveryOrder order, List<Drone> drones, List<Depot> depots) {
         return drones.stream()
                 .filter(d -> d.getStatus() == DroneStatus.IDLE ||
-                            (d.getStatus() == DroneStatus.CHARGING && d.getBatteryPercent() >= 75.0))
+                            (d.getStatus() == DroneStatus.CHARGING && d.getBatteryPercent() >= 70.0))
                 .filter(d -> d.getModelType().getMaxPayloadKg() >= order.getPackageWeightKg())
-                .filter(d -> hasSufficientRange(d, order, depots))
-                .min(Comparator.comparingDouble(d -> calculateDispatchCost(d, order, depots)));
+                .filter(d -> hasSufficientBattery(d, order, depots))
+                .min(Comparator.comparingDouble(d -> calculateCost(d, order, depots)));
     }
 
-    private boolean hasSufficientRange(Drone drone, DeliveryOrder order, List<Depot> depots) {
+    private boolean hasSufficientBattery(Drone drone, DeliveryOrder order, List<Depot> depots) {
         Depot depot = depots.stream()
                 .filter(d -> d.getId().equals(drone.getCurrentDepotId()))
                 .findFirst()
                 .orElse(null);
         if (depot == null) return false;
 
-        double roundtripDistanceMeters = depot.toCoordinate().distanceTo(order.getDeliveryCoordinate()) * 2.2; // with buffers
-        double cruiseSpeed = drone.getModelType().getMaxSpeedMps();
-        double estimatedFlightTimeSeconds = roundtripDistanceMeters / cruiseSpeed;
-
-        // Approximate 1% battery per 15-20 seconds under payload
-        double estimatedBatteryDrain = (estimatedFlightTimeSeconds / 18.0) * (1.0 + (order.getPackageWeightKg() / 5.0));
-        double requiredBattery = estimatedBatteryDrain + 20.0; // 20% safety margin
-
-        return drone.getBatteryPercent() >= requiredBattery;
+        double roundtripDistance = depot.getLocation().distanceTo(order.getDeliveryLocation()) * 2.0;
+        // ~1% battery per 15 grid units
+        double estimatedBatteryDrain = (roundtripDistance / 15.0);
+        return drone.getBatteryPercent() >= (estimatedBatteryDrain + 15.0); // 15% safety buffer
     }
 
-    private double calculateDispatchCost(Drone drone, DeliveryOrder order, List<Depot> depots) {
+    private double calculateCost(Drone drone, DeliveryOrder order, List<Depot> depots) {
         Depot depot = depots.stream()
                 .filter(d -> d.getId().equals(drone.getCurrentDepotId()))
                 .findFirst()
                 .orElse(null);
         if (depot == null) return Double.MAX_VALUE;
 
-        double dist = depot.toCoordinate().distanceTo(order.getDeliveryCoordinate());
-        // Prefer higher battery, shorter distance, and matching payload size
-        return dist - (drone.getBatteryPercent() * 20.0) + (drone.getModelType().getMaxPayloadKg() * 10.0);
+        double distance = depot.getLocation().distanceTo(order.getDeliveryLocation());
+        return distance - (drone.getBatteryPercent() * 2.0);
     }
 }

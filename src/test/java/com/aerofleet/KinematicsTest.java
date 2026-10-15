@@ -1,46 +1,44 @@
 package com.aerofleet;
 
-import com.aerofleet.domain.model.GeoCoordinate;
+import com.aerofleet.domain.model.Location;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class KinematicsTest {
 
     @Test
-    public void testHaversineDistance() {
-        // San Francisco (37.7749, -122.4194) to Oakland (37.8044, -122.2712) ~13.4 km
-        GeoCoordinate sf = new GeoCoordinate(37.7749, -122.4194, 0.0);
-        GeoCoordinate oakland = new GeoCoordinate(37.8044, -122.2712, 0.0);
+    public void testEuclideanPythagoreanDistance() {
+        // Standard 3-4-5 right triangle: (0,0) to (30, 40) is 50.0
+        Location origin = new Location(0.0, 0.0);
+        Location target = new Location(30.0, 40.0);
 
-        double distance = sf.distanceTo(oakland);
-        assertTrue(distance > 13000.0 && distance < 14000.0, "Distance should be ~13.4km, got: " + distance);
+        double distance = origin.distanceTo(target);
+        assertEquals(50.0, distance, 0.001, "Distance in 3-4-5 triangle must equal 50.0");
     }
 
     @Test
     public void testBearingCalculation() {
-        GeoCoordinate origin = new GeoCoordinate(0.0, 0.0, 0.0);
-        GeoCoordinate north = new GeoCoordinate(1.0, 0.0, 0.0);
-        GeoCoordinate east = new GeoCoordinate(0.0, 1.0, 0.0);
-
-        double bearingNorth = origin.bearingTo(north);
-        assertEquals(0.0, bearingNorth, 1.0, "Bearing towards north should be ~0 degrees");
+        Location origin = new Location(100.0, 100.0);
+        Location east = new Location(200.0, 100.0);
+        Location south = new Location(100.0, 200.0);
 
         double bearingEast = origin.bearingTo(east);
-        assertEquals(90.0, bearingEast, 1.0, "Bearing towards east should be ~90 degrees");
+        assertEquals(0.0, bearingEast, 0.5, "Bearing directly east/right must be 0 degrees");
+
+        double bearingSouth = origin.bearingTo(south);
+        assertEquals(90.0, bearingSouth, 0.5, "Bearing directly south/down must be 90 degrees");
     }
 
     @Test
     public void testMoveTowards() {
-        GeoCoordinate p1 = new GeoCoordinate(37.7749, -122.4194, 0.0);
-        GeoCoordinate p2 = new GeoCoordinate(37.7849, -122.4194, 100.0);
+        Location start = new Location(0.0, 0.0);
+        Location target = new Location(100.0, 0.0);
+        double step = 25.0;
 
-        double totalDist = p1.distanceTo(p2);
-        double step = 200.0;
+        Location moved = start.moveTowards(target, step);
 
-        GeoCoordinate intermediate = p1.moveTowards(p2, step);
-
-        double distFromStart = p1.distanceTo(intermediate);
-        assertEquals(step, distFromStart, 2.0, "Intermediate point should be exactly step distance away");
-        assertTrue(intermediate.getAltitudeMeters() > 0.0, "Altitude should interpolate upward");
+        assertEquals(25.0, moved.getX(), 0.001, "X should advance by exactly step distance");
+        assertEquals(0.0, moved.getY(), 0.001, "Y should stay constant");
+        assertEquals(25.0, start.distanceTo(moved), 0.001);
     }
 }

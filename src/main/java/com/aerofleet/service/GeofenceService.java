@@ -1,12 +1,15 @@
 package com.aerofleet.service;
 
-import com.aerofleet.domain.model.GeoCoordinate;
+import com.aerofleet.domain.model.Location;
 import com.aerofleet.domain.model.NoFlyZone;
 import com.aerofleet.repository.NoFlyZoneRepository;
 import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Service managing 2D restricted airspace and obstacle avoidance.
+ */
 @Service
 public class GeofenceService {
 
@@ -20,12 +23,12 @@ public class GeofenceService {
         return noFlyZoneRepository.findByActiveTrue();
     }
 
-    public boolean isPointInRestrictedAirspace(GeoCoordinate coord) {
-        if (coord == null) return false;
-        return getActiveZones().stream().anyMatch(zone -> zone.violatesZone(coord));
+    public boolean isPointInRestrictedAirspace(Location loc) {
+        if (loc == null) return false;
+        return getActiveZones().stream().anyMatch(zone -> zone.violatesZone(loc));
     }
 
-    public Optional<NoFlyZone> getIntersectedZone(GeoCoordinate start, GeoCoordinate end) {
+    public Optional<NoFlyZone> getIntersectedZone(Location start, Location end) {
         if (start == null || end == null) return Optional.empty();
         return getActiveZones().stream()
                 .filter(zone -> zone.intersectsPath(start, end))
@@ -33,30 +36,33 @@ public class GeofenceService {
     }
 
     /**
-     * Calculates an avoidance waypoint offset perpendicular to the line between start and end,
-     * routing around the violated No-Fly Zone with a safety buffer.
+     * Calculates a simple 2D detour waypoint routing around the circular No-Fly Zone.
      */
-    public GeoCoordinate calculateBypassWaypoint(GeoCoordinate start, GeoCoordinate end, NoFlyZone zone) {
-        GeoCoordinate center = zone.getCenterCoordinate();
-        double safetyRadiusMeters = zone.getRadiusMeters() * 1.30; // 30% margin
+    public Location calculateBypassWaypoint(Location start, Location end, NoFlyZone zone) {
+        Location center = zone.getCenterLocation();
+        double safetyDistance = zone.getRadius() * 1.35;
 
-        // Bearing from start to center of zone
-        double bearingToCenter = start.bearingTo(center);
+        // Vector from start to end
+        double dx = end.getX() - start.getX();
+        double dy = end.getY() - start.getY();
+        double length = Math.sqrt(dx * dx + dy * dy);
 
-        // Deflect 75 degrees away from center
-        double detourBearing = (bearingToCenter + 75.0) % 360.0;
+        if (length == 0.0) {
+            return new Location(center.getX() + safetyDistance, center.getY());
+        }
 
-        // Create bypass point outside safety perimeter
-        GeoCoordinate bypass = center.moveTowards(
-                new GeoCoordinate(
-                        center.getLatitude() + 0.05 * Math.cos(Math.toRadians(detourBearing)),
-                        center.getLongitude() + 0.05 * Math.sin(Math.toRadians(detourBearing)),
-                        Math.max(start.getAltitudeMeters(), zone.getMaxAltitudeMeters() + 10.0)
-                ),
-                safetyRadiusMeters
-        );
+        // Perpendicular normal vector: (-dy, dx)
+        double nx = -dy / length;
+        double ny = dx / length;
 
-        bypass.setAltitudeMeters(start.getAltitudeMeters());
-        return bypass;
+        // Push detour point outward from circle center along normal
+        double bypassX = center.getX() + (nx * safetyDistance);
+        double bypassY = center.getY() + (ny * safetyDistance);
+
+        // Keep inside reasonable grid bounds [10, 790]
+        bypassX = Math.max(20.0, Math.min(780.0, bypassX));
+        bypassY = Math.max(20.0, Math.min(580.0, bypassY));
+
+        return new Location(bypassX, bypassY);
     }
 }

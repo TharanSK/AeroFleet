@@ -3,36 +3,39 @@ package com.aerofleet.domain.model;
 import com.aerofleet.domain.enums.DroneStatus;
 import java.io.Serializable;
 
+/**
+ * Represents a navigational waypoint in a flight plan.
+ */
 public class Waypoint implements Serializable {
-    private GeoCoordinate coordinate;
-    private double targetSpeedMps;
+    private Location location;
+    private double targetSpeed;
     private DroneStatus expectedStatus;
     private String actionDescription;
 
     public Waypoint() {
     }
 
-    public Waypoint(GeoCoordinate coordinate, double targetSpeedMps, DroneStatus expectedStatus, String actionDescription) {
-        this.coordinate = coordinate;
-        this.targetSpeedMps = targetSpeedMps;
+    public Waypoint(Location location, double targetSpeed, DroneStatus expectedStatus, String actionDescription) {
+        this.location = location;
+        this.targetSpeed = targetSpeed;
         this.expectedStatus = expectedStatus;
         this.actionDescription = actionDescription;
     }
 
-    public GeoCoordinate getCoordinate() {
-        return coordinate;
+    public Location getLocation() {
+        return location;
     }
 
-    public void setCoordinate(GeoCoordinate coordinate) {
-        this.coordinate = coordinate;
+    public void setLocation(Location location) {
+        this.location = location;
     }
 
-    public double getTargetSpeedMps() {
-        return targetSpeedMps;
+    public double getTargetSpeed() {
+        return targetSpeed;
     }
 
-    public void setTargetSpeedMps(double targetSpeedMps) {
-        this.targetSpeedMps = targetSpeedMps;
+    public void setTargetSpeed(double targetSpeed) {
+        this.targetSpeed = targetSpeed;
     }
 
     public DroneStatus getExpectedStatus() {

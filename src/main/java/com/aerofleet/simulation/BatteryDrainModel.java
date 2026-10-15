@@ -6,6 +6,10 @@ import com.aerofleet.service.WeatherService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+/**
+ * Educational battery drain & recharge model for delivery drones.
+ * Demonstrates basic physics formulas: Base Drain + Payload Factor * Weather Drag.
+ */
 @Component
 public class BatteryDrainModel {
 
@@ -20,50 +24,36 @@ public class BatteryDrainModel {
     }
 
     /**
-     * Computes the new battery percentage for a drone after deltaSeconds.
+     * Calculates updated battery percentage after deltaSeconds.
      */
-    public double updateBattery(Drone drone, double deltaSeconds, double altitudeChangeMeters) {
+    public double updateBattery(Drone drone, double deltaSeconds) {
         if (drone == null || deltaSeconds <= 0.0) return 0.0;
 
         DroneStatus status = drone.getStatus();
 
-        // If charging at depot pad
+        // 1. Recharging when docked at Depot
         if (status == DroneStatus.CHARGING) {
             double newCharge = drone.getBatteryPercent() + (chargingRatePercentPerSec * deltaSeconds);
             return Math.min(100.0, newCharge);
         }
 
-        // If stationary and idle on the ground, negligible drain
+        // 2. Stationary / Idle on pad
         if (status == DroneStatus.IDLE || status == DroneStatus.MAINTENANCE) {
             return drone.getBatteryPercent();
         }
 
-        double capacityWh = drone.getModelType().getBatteryCapacityWh();
+        // 3. In-Flight Discharge: Base rate + Payload factor
+        double baseDrainRatePerSec = 0.4; // 0.4% per second
         double maxPayload = drone.getModelType().getMaxPayloadKg();
-        double currentPayload = Math.min(maxPayload, drone.getCurrentPayloadKg());
+        double payloadRatio = maxPayload > 0 ? (drone.getCurrentPayloadKg() / maxPayload) : 0.0;
+
+        double payloadDrainRatePerSec = 0.3 * payloadRatio; // extra drain when carrying cargo
         double dragMultiplier = weatherService.getDragMultiplier();
 
-        // Nominal power draw: 220W base + payload scaling
-        double payloadRatio = maxPayload > 0 ? (currentPayload / maxPayload) : 0.0;
-        double basePowerWatts = 200.0 + (180.0 * payloadRatio);
+        double totalDrainRate = (baseDrainRatePerSec + payloadDrainRatePerSec) * dragMultiplier;
+        double drainAmount = totalDrainRate * deltaSeconds;
 
-        // Climb power penalty or descent power reduction
-        if (altitudeChangeMeters > 0.05) {
-            basePowerWatts += 120.0; // Extra thrust to gain altitude
-        } else if (altitudeChangeMeters < -0.05) {
-            basePowerWatts *= 0.65;  // Low throttle descent
-        }
-
-        // Apply environmental drag
-        double totalPowerWatts = basePowerWatts * dragMultiplier;
-
-        // Energy consumed in watt-hours during deltaSeconds
-        double energyConsumedWh = (totalPowerWatts * deltaSeconds) / 3600.0;
-
-        // Convert Wh to battery percentage
-        double percentDrained = (energyConsumedWh / capacityWh) * 100.0;
-
-        double updatedPercent = drone.getBatteryPercent() - percentDrained;
+        double updatedPercent = drone.getBatteryPercent() - drainAmount;
         return Math.max(0.0, Math.min(100.0, updatedPercent));
     }
 

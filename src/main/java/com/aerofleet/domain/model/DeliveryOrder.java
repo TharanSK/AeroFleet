@@ -1,6 +1,7 @@
 package com.aerofleet.domain.model;
 
 import com.aerofleet.domain.enums.OrderStatus;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -10,6 +11,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
+/**
+ * Delivery Order submitted by customers on the 2D grid.
+ */
 @Entity
 @Table(name = "delivery_orders")
 public class DeliveryOrder {
@@ -20,8 +24,11 @@ public class DeliveryOrder {
 
     private String orderNumber;
     private String customerName;
-    private double deliveryLatitude;
-    private double deliveryLongitude;
+    @Column(name = "delivery_x")
+    private double deliveryX;
+
+    @Column(name = "delivery_y")
+    private double deliveryY;
     private double packageWeightKg;
     private String priority; // STANDARD, EXPRESS, MEDICAL
 
@@ -40,19 +47,19 @@ public class DeliveryOrder {
         this.priority = "STANDARD";
     }
 
-    public DeliveryOrder(String orderNumber, String customerName, double deliveryLatitude, double deliveryLongitude, double packageWeightKg, String priority, Long originDepotId) {
+    public DeliveryOrder(String orderNumber, String customerName, double deliveryX, double deliveryY, double packageWeightKg, String priority, Long originDepotId) {
         this();
         this.orderNumber = orderNumber;
         this.customerName = customerName;
-        this.deliveryLatitude = deliveryLatitude;
-        this.deliveryLongitude = deliveryLongitude;
+        this.deliveryX = deliveryX;
+        this.deliveryY = deliveryY;
         this.packageWeightKg = packageWeightKg;
         this.priority = priority != null ? priority : "STANDARD";
         this.originDepotId = originDepotId;
     }
 
-    public GeoCoordinate getDeliveryCoordinate() {
-        return new GeoCoordinate(deliveryLatitude, deliveryLongitude, 0.0);
+    public Location getDeliveryLocation() {
+        return new Location(deliveryX, deliveryY);
     }
 
     public Long getId() {
@@ -79,20 +86,20 @@ public class DeliveryOrder {
         this.customerName = customerName;
     }
 
-    public double getDeliveryLatitude() {
-        return deliveryLatitude;
+    public double getDeliveryX() {
+        return deliveryX;
     }
 
-    public void setDeliveryLatitude(double deliveryLatitude) {
-        this.deliveryLatitude = deliveryLatitude;
+    public void setDeliveryX(double deliveryX) {
+        this.deliveryX = deliveryX;
     }
 
-    public double getDeliveryLongitude() {
-        return deliveryLongitude;
+    public double getDeliveryY() {
+        return deliveryY;
     }
 
-    public void setDeliveryLongitude(double deliveryLongitude) {
-        this.deliveryLongitude = deliveryLongitude;
+    public void setDeliveryY(double deliveryY) {
+        this.deliveryY = deliveryY;
     }
 
     public double getPackageWeightKg() {

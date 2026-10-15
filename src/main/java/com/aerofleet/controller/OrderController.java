@@ -16,6 +16,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+/**
+ * REST API for managing delivery orders on the 2D grid.
+ */
 @RestController
 @RequestMapping("/api/v1/orders")
 @CrossOrigin(origins = "*")
@@ -48,12 +51,12 @@ public class OrderController {
 
     @PostMapping
     public ResponseEntity<DeliveryOrder> createOrder(@Valid @RequestBody CreateOrderRequest request) {
-        String orderNum = "ORD-" + System.currentTimeMillis() % 100000;
+        String orderNum = "ORD-" + (1000 + random.nextInt(9000));
         DeliveryOrder order = new DeliveryOrder(
                 orderNum,
                 request.getCustomerName(),
-                request.getDeliveryLatitude(),
-                request.getDeliveryLongitude(),
+                request.getDeliveryX(),
+                request.getDeliveryY(),
                 request.getPackageWeightKg(),
                 request.getPriority(),
                 request.getOriginDepotId()
@@ -63,11 +66,11 @@ public class OrderController {
 
         telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
                 "INFO", "Order Created",
-                "New order #" + orderNum + " received for " + request.getCustomerName() + " (" + request.getPackageWeightKg() + "kg)",
+                "Order #" + orderNum + " for " + request.getCustomerName() + " at (" + (int)order.getDeliveryX() + ", " + (int)order.getDeliveryY() + ")",
                 null, saved.getId()
         ));
 
-        // Trigger instant dispatch
+        // Attempt instant dispatch
         dispatchService.dispatchPendingOrders();
 
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
@@ -81,9 +84,9 @@ public class OrderController {
         }
 
         String[] customers = {
-                "Oakridge Medical Clinic", "Highland Tech Labs", "Metro General Hospital",
-                "Westwood Pharmacy", "Downtown Grocers", "Riverside Research",
-                "Sunset Boulevard Cafe", "Horizon Biotech Hub"
+                "Campus Health Center", "Engineering Block B", "Science Library",
+                "North Dormitory", "Student Union Complex", "Athletic Pavilion",
+                "Robotics Innovation Lab", "South Cafeteria"
         };
 
         String[] priorities = {"STANDARD", "EXPRESS", "MEDICAL"};
@@ -93,19 +96,17 @@ public class OrderController {
         for (int i = 0; i < Math.min(count, 15); i++) {
             Depot baseDepot = depots.get(random.nextInt(depots.size()));
 
-            // Random drop within ~3.5km of base depot
-            double latOffset = (random.nextDouble() - 0.5) * 0.05;
-            double lonOffset = (random.nextDouble() - 0.5) * 0.05;
-            double targetLat = baseDepot.getLatitude() + latOffset;
-            double targetLon = baseDepot.getLongitude() + lonOffset;
+            // Random coordinates on grid [80, 720] x [80, 520]
+            double targetX = 80 + random.nextInt(640);
+            double targetY = 80 + random.nextInt(440);
 
             String customer = customers[random.nextInt(customers.length)];
             String priority = priorities[random.nextInt(priorities.length)];
-            double weight = Math.round((0.5 + (random.nextDouble() * 4.5)) * 10.0) / 10.0;
+            double weight = Math.round((0.5 + (random.nextDouble() * 4.0)) * 10.0) / 10.0;
             String orderNum = "ORD-" + (1000 + random.nextInt(9000));
 
             DeliveryOrder order = new DeliveryOrder(
-                    orderNum, customer, targetLat, targetLon, weight, priority, baseDepot.getId()
+                    orderNum, customer, targetX, targetY, weight, priority, baseDepot.getId()
             );
 
             createdOrders.add(orderRepository.save(order));
@@ -113,7 +114,7 @@ public class OrderController {
 
         telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
                 "INFO", "Batch Orders Queued",
-                "Generated " + createdOrders.size() + " simulation delivery orders.",
+                "Queued " + createdOrders.size() + " orders across the grid map.",
                 null, null
         ));
 

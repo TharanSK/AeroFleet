@@ -6,7 +6,7 @@ import com.aerofleet.domain.enums.OrderStatus;
 import com.aerofleet.domain.model.DeliveryOrder;
 import com.aerofleet.domain.model.Depot;
 import com.aerofleet.domain.model.Drone;
-import com.aerofleet.domain.model.GeoCoordinate;
+import com.aerofleet.domain.model.Location;
 import com.aerofleet.domain.model.Waypoint;
 import com.aerofleet.dto.AlertEventDTO;
 import com.aerofleet.dto.FleetSnapshotDTO;
@@ -32,6 +32,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Core simulation tick engine running the 2D grid discrete loop.
+ * Demonstrates Multithreading (ScheduledExecutorService) and Concurrent Collections.
+ */
 @Service
 public class SimulationEngine {
 
@@ -46,7 +50,7 @@ public class SimulationEngine {
     private final WeatherService weatherService;
     private final TelemetryBroadcaster telemetryBroadcaster;
 
-    // In-memory runtime cache for drones with active waypoints
+    // Thread-safe in-memory cache for live drones
     private final ConcurrentHashMap<Long, Drone> runtimeDrones = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -84,7 +88,7 @@ public class SimulationEngine {
     public void init() {
         syncRuntimeDronesFromDb();
         scheduler.scheduleAtFixedRate(this::tick, 1000, tickIntervalMs, TimeUnit.MILLISECONDS);
-        log.info("AeroFleet Simulation Engine started at {}ms tick interval", tickIntervalMs);
+        log.info("AeroFleet 2D Grid Simulation Engine started at {}ms tick interval", tickIntervalMs);
     }
 
     @PreDestroy
@@ -100,7 +104,7 @@ public class SimulationEngine {
     }
 
     /**
-     * Core simulation tick loop running once per second.
+     * Fixed-rate discrete tick loop.
      */
     public void tick() {
         try {
@@ -112,17 +116,16 @@ public class SimulationEngine {
             double deltaSeconds = 1.0 * speedMultiplier;
             simTimeElapsedSeconds += (long) deltaSeconds;
 
-            // 1. Dispatch pending orders to eligible drones
+            // 1. Dispatch pending orders
             dispatchService.dispatchPendingOrders();
 
-            // Refresh runtime map if new drones were assigned
+            // Refresh runtime state if new assignments occurred
             List<Drone> dbDrones = droneRepository.findAll();
             for (Drone dbDrone : dbDrones) {
                 Drone runtimeDrone = runtimeDrones.get(dbDrone.getId());
                 if (runtimeDrone == null) {
                     runtimeDrones.put(dbDrone.getId(), dbDrone);
                 } else if (runtimeDrone.getAssignedOrderId() == null && dbDrone.getAssignedOrderId() != null) {
-                    // Update runtime drone with route assigned by DispatchService
                     runtimeDrone.setAssignedOrderId(dbDrone.getAssignedOrderId());
                     runtimeDrone.setCurrentPayloadKg(dbDrone.getCurrentPayloadKg());
                     runtimeDrone.setStatus(dbDrone.getStatus());
@@ -130,7 +133,7 @@ public class SimulationEngine {
                 }
             }
 
-            // 2. Process each drone's flight kinematics & battery
+            // 2. Advance 2D coordinates & battery for each drone
             for (Drone drone : runtimeDrones.values()) {
                 processDroneTick(drone, deltaSeconds);
                 droneRepository.save(drone);
@@ -147,74 +150,69 @@ public class SimulationEngine {
     private void processDroneTick(Drone drone, double deltaSeconds) {
         DroneStatus status = drone.getStatus();
 
-        // Handle stationary states
+        // Stationary state
         if (status == DroneStatus.IDLE || status == DroneStatus.MAINTENANCE) {
             return;
         }
 
-        // Handle charging on depot pad
+        // Charging on pad at depot
         if (status == DroneStatus.CHARGING) {
-            double newBattery = batteryDrainModel.updateBattery(drone, deltaSeconds, 0.0);
+            double newBattery = batteryDrainModel.updateBattery(drone, deltaSeconds);
             drone.setBatteryPercent(newBattery);
             if (newBattery >= 100.0) {
                 drone.setStatus(DroneStatus.IDLE);
                 telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
-                        "INFO", "Charging Complete", "Drone [" + drone.getCallsign() + "] is at 100% battery.",
+                        "INFO", "Charging Complete", "Drone [" + drone.getCallsign() + "] charged to 100%.",
                         drone.getId(), null
                 ));
             }
             return;
         }
 
-        // Active Flight States
+        // Active Flight State
         Waypoint targetWaypoint = drone.getCurrentWaypoint();
         if (targetWaypoint == null) {
             if (status == DroneStatus.LANDING || status == DroneStatus.RETURNING) {
                 drone.setStatus(DroneStatus.CHARGING);
-                drone.setCurrentSpeedMps(0.0);
-                drone.setCurrentAltitudeMeters(0.0);
+                drone.setSpeed(0.0);
             }
             return;
         }
 
-        GeoCoordinate currentCoord = drone.getCurrentCoordinate();
-        GeoCoordinate targetCoord = targetWaypoint.getCoordinate();
+        Location currentLoc = drone.getLocation();
+        Location targetLoc = targetWaypoint.getLocation();
 
-        double distanceToTarget = currentCoord.distanceTo(targetCoord);
-        double targetSpeed = targetWaypoint.getTargetSpeedMps();
+        double distanceToTarget = currentLoc.distanceTo(targetLoc);
+        double targetSpeed = targetWaypoint.getTargetSpeed();
         double stepDistance = targetSpeed * deltaSeconds;
 
-        double altitudeChange = 0.0;
-
         // Waypoint arrival check
-        if (distanceToTarget <= Math.max(stepDistance, 6.0) || targetSpeed == 0.0) {
+        if (distanceToTarget <= Math.max(stepDistance, 5.0) || targetSpeed == 0.0) {
             handleWaypointArrival(drone, targetWaypoint);
         } else {
-            // Move drone towards waypoint
-            GeoCoordinate nextCoord = currentCoord.moveTowards(targetCoord, stepDistance);
-            double heading = currentCoord.bearingTo(targetCoord);
+            // Move along 2D vector towards target
+            Location nextLoc = currentLoc.moveTowards(targetLoc, stepDistance);
+            double heading = currentLoc.bearingTo(targetLoc);
 
-            altitudeChange = nextCoord.getAltitudeMeters() - drone.getCurrentAltitudeMeters();
-
-            drone.setCurrentCoordinate(nextCoord);
+            drone.setLocation(nextLoc);
             drone.setHeadingDegrees(heading);
-            drone.setCurrentSpeedMps(targetSpeed);
+            drone.setSpeed(targetSpeed);
             drone.setStatus(targetWaypoint.getExpectedStatus());
-            drone.setTotalDistanceTraveledMeters(drone.getTotalDistanceTraveledMeters() + stepDistance);
+            drone.setTotalDistanceTraveled(drone.getTotalDistanceTraveled() + stepDistance);
             drone.setTotalFlightTimeSeconds(drone.getTotalFlightTimeSeconds() + (long) deltaSeconds);
         }
 
-        // Update battery drain under flight & weather
-        double newBattery = batteryDrainModel.updateBattery(drone, deltaSeconds, altitudeChange);
+        // Update battery percentage
+        double newBattery = batteryDrainModel.updateBattery(drone, deltaSeconds);
         drone.setBatteryPercent(newBattery);
 
-        // Check Low-Battery Return-To-Home Failsafe
+        // Failsafe: Emergency Return-To-Home
         if (newBattery <= minReturnBatteryPercent &&
                 status != DroneStatus.RETURNING &&
                 status != DroneStatus.EMERGENCY_RTH &&
                 status != DroneStatus.LANDING &&
                 status != DroneStatus.CHARGING) {
-            triggerEmergencyRth(drone, "Low battery warning: " + String.format("%.1f%%", newBattery));
+            triggerEmergencyRth(drone, "Low battery failsafe: " + String.format("%.1f%%", newBattery));
         }
     }
 
@@ -222,7 +220,7 @@ public class SimulationEngine {
         DroneStatus expected = waypoint.getExpectedStatus();
 
         if (expected == DroneStatus.DELIVERING) {
-            // Package delivered to customer!
+            // Package delivered!
             if (drone.getAssignedOrderId() != null) {
                 orderRepository.findById(drone.getAssignedOrderId()).ifPresent(order -> {
                     order.setStatus(OrderStatus.DELIVERED);
@@ -230,8 +228,8 @@ public class SimulationEngine {
                     orderRepository.save(order);
 
                     telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
-                            "SUCCESS", "Package Delivered",
-                            "Order #" + order.getOrderNumber() + " delivered successfully by " + drone.getCallsign(),
+                            "SUCCESS", "Delivered",
+                            "Order #" + order.getOrderNumber() + " delivered by " + drone.getCallsign(),
                             drone.getId(), order.getId()
                     ));
                     telemetryBroadcaster.broadcastOrderUpdate(order);
@@ -240,16 +238,15 @@ public class SimulationEngine {
             drone.setCurrentPayloadKg(0.0);
             drone.setSuccessfulDeliveriesCount(drone.getSuccessfulDeliveriesCount() + 1);
         } else if (expected == DroneStatus.LANDING) {
-            // Landed back on pad at depot
+            // Landed back at depot
             drone.setStatus(DroneStatus.CHARGING);
-            drone.setCurrentSpeedMps(0.0);
-            drone.setCurrentAltitudeMeters(0.0);
+            drone.setSpeed(0.0);
             drone.setAssignedOrderId(null);
             drone.clearFlightPlan();
 
             telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
-                    "INFO", "Drone Docked",
-                    "Drone [" + drone.getCallsign() + "] landed on charging pad.",
+                    "INFO", "Landed at Hub",
+                    "Drone [" + drone.getCallsign() + "] docked on charging pad.",
                     drone.getId(), null
             ));
             return;
@@ -259,12 +256,12 @@ public class SimulationEngine {
     }
 
     public void triggerEmergencyRth(Drone drone, String reason) {
-        log.warn("Triggering Emergency RTH for Drone [{}] due to: {}", drone.getCallsign(), reason);
+        log.warn("Emergency RTH triggered for Drone [{}] due to: {}", drone.getCallsign(), reason);
 
-        // Find nearest depot
+        // Find nearest depot on 2D grid
         List<Depot> depots = depotRepository.findAll();
         Depot nearestDepot = depots.stream()
-                .min(Comparator.comparingDouble(d -> d.toCoordinate().distanceTo(drone.getCurrentCoordinate())))
+                .min(Comparator.comparingDouble(d -> d.getLocation().distanceTo(drone.getLocation())))
                 .orElse(null);
 
         if (nearestDepot != null) {
@@ -274,8 +271,8 @@ public class SimulationEngine {
             drone.setCurrentDepotId(nearestDepot.getId());
 
             telemetryBroadcaster.broadcastAlert(new AlertEventDTO(
-                    "DANGER", "Emergency RTH Initiated",
-                    drone.getCallsign() + " aborting mission: " + reason,
+                    "DANGER", "Emergency RTH",
+                    drone.getCallsign() + " aborting: " + reason,
                     drone.getId(), drone.getAssignedOrderId()
             ));
 
@@ -302,7 +299,7 @@ public class SimulationEngine {
                     drone.getId(), null
             ));
         } else if ("MOTOR_FAULT".equalsIgnoreCase(type)) {
-            triggerEmergencyRth(drone, "Injected motor telemetry warning");
+            triggerEmergencyRth(drone, "Simulated motor fault");
         }
     }
 
@@ -324,10 +321,9 @@ public class SimulationEngine {
             pkt.setDroneId(drone.getId());
             pkt.setCallsign(drone.getCallsign());
             pkt.setModelType(drone.getModelType());
-            pkt.setLatitude(drone.getCurrentLatitude());
-            pkt.setLongitude(drone.getCurrentLongitude());
-            pkt.setAltitudeMeters(drone.getCurrentAltitudeMeters());
-            pkt.setSpeedMps(drone.getCurrentSpeedMps());
+            pkt.setX(drone.getX());
+            pkt.setY(drone.getY());
+            pkt.setSpeed(drone.getSpeed());
             pkt.setHeadingDegrees(drone.getHeadingDegrees());
             pkt.setBatteryPercent(drone.getBatteryPercent());
             pkt.setPayloadKg(drone.getCurrentPayloadKg());
@@ -337,8 +333,8 @@ public class SimulationEngine {
 
             Waypoint wp = drone.getCurrentWaypoint();
             if (wp != null) {
-                pkt.setTargetLat(wp.getCoordinate().getLatitude());
-                pkt.setTargetLon(wp.getCoordinate().getLongitude());
+                pkt.setTargetX(wp.getLocation().getX());
+                pkt.setTargetY(wp.getLocation().getY());
             }
             pkt.setWaypointIndex(drone.getCurrentWaypointIndex());
             pkt.setTotalWaypoints(drone.getWaypoints() != null ? drone.getWaypoints().size() : 0);

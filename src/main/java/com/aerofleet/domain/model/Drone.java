@@ -13,6 +13,9 @@ import jakarta.persistence.Transient;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Autonomous delivery drone entity navigating the 2D grid.
+ */
 @Entity
 @Table(name = "drones")
 public class Drone {
@@ -26,10 +29,9 @@ public class Drone {
     @Enumerated(EnumType.STRING)
     private DroneModelType modelType;
 
-    private double currentLatitude;
-    private double currentLongitude;
-    private double currentAltitudeMeters;
-    private double currentSpeedMps;
+    private double x;
+    private double y;
+    private double speed;
     private double headingDegrees;
     private double batteryPercent;
     private double currentPayloadKg;
@@ -41,7 +43,7 @@ public class Drone {
     private Long assignedOrderId;
 
     private long totalFlightTimeSeconds;
-    private double totalDistanceTraveledMeters;
+    private double totalDistanceTraveled;
     private int successfulDeliveriesCount;
 
     @Transient
@@ -53,33 +55,31 @@ public class Drone {
     public Drone() {
         this.status = DroneStatus.IDLE;
         this.batteryPercent = 100.0;
-        this.currentSpeedMps = 0.0;
-        this.currentAltitudeMeters = 0.0;
+        this.speed = 0.0;
         this.headingDegrees = 0.0;
         this.currentPayloadKg = 0.0;
         this.totalFlightTimeSeconds = 0;
-        this.totalDistanceTraveledMeters = 0;
+        this.totalDistanceTraveled = 0;
         this.successfulDeliveriesCount = 0;
     }
 
-    public Drone(String callsign, DroneModelType modelType, double latitude, double longitude, Long depotId) {
+    public Drone(String callsign, DroneModelType modelType, double x, double y, Long depotId) {
         this();
         this.callsign = callsign;
         this.modelType = modelType;
-        this.currentLatitude = latitude;
-        this.currentLongitude = longitude;
+        this.x = x;
+        this.y = y;
         this.currentDepotId = depotId;
     }
 
-    public GeoCoordinate getCurrentCoordinate() {
-        return new GeoCoordinate(currentLatitude, currentLongitude, currentAltitudeMeters);
+    public Location getLocation() {
+        return new Location(x, y);
     }
 
-    public void setCurrentCoordinate(GeoCoordinate coord) {
-        if (coord != null) {
-            this.currentLatitude = coord.getLatitude();
-            this.currentLongitude = coord.getLongitude();
-            this.currentAltitudeMeters = coord.getAltitudeMeters();
+    public void setLocation(Location loc) {
+        if (loc != null) {
+            this.x = loc.getX();
+            this.y = loc.getY();
         }
     }
 
@@ -129,36 +129,28 @@ public class Drone {
         this.modelType = modelType;
     }
 
-    public double getCurrentLatitude() {
-        return currentLatitude;
+    public double getX() {
+        return x;
     }
 
-    public void setCurrentLatitude(double currentLatitude) {
-        this.currentLatitude = currentLatitude;
+    public void setX(double x) {
+        this.x = x;
     }
 
-    public double getCurrentLongitude() {
-        return currentLongitude;
+    public double getY() {
+        return y;
     }
 
-    public void setCurrentLongitude(double currentLongitude) {
-        this.currentLongitude = currentLongitude;
+    public void setY(double y) {
+        this.y = y;
     }
 
-    public double getCurrentAltitudeMeters() {
-        return currentAltitudeMeters;
+    public double getSpeed() {
+        return speed;
     }
 
-    public void setCurrentAltitudeMeters(double currentAltitudeMeters) {
-        this.currentAltitudeMeters = currentAltitudeMeters;
-    }
-
-    public double getCurrentSpeedMps() {
-        return currentSpeedMps;
-    }
-
-    public void setCurrentSpeedMps(double currentSpeedMps) {
-        this.currentSpeedMps = currentSpeedMps;
+    public void setSpeed(double speed) {
+        this.speed = speed;
     }
 
     public double getHeadingDegrees() {
@@ -217,12 +209,12 @@ public class Drone {
         this.totalFlightTimeSeconds = totalFlightTimeSeconds;
     }
 
-    public double getTotalDistanceTraveledMeters() {
-        return totalDistanceTraveledMeters;
+    public double getTotalDistanceTraveled() {
+        return totalDistanceTraveled;
     }
 
-    public void setTotalDistanceTraveledMeters(double totalDistanceTraveledMeters) {
-        this.totalDistanceTraveledMeters = totalDistanceTraveledMeters;
+    public void setTotalDistanceTraveled(double totalDistanceTraveled) {
+        this.totalDistanceTraveled = totalDistanceTraveled;
     }
 
     public int getSuccessfulDeliveriesCount() {

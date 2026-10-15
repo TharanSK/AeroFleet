@@ -5,16 +5,23 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
+/**
+ * Customer order request submitted from the UI.
+ */
 public class CreateOrderRequest {
 
     @NotBlank(message = "Customer name is required")
     private String customerName;
 
-    @NotNull(message = "Delivery latitude is required")
-    private Double deliveryLatitude;
+    @NotNull(message = "Delivery X coordinate is required")
+    @DecimalMin(value = "0.0", message = "X coordinate must be >= 0")
+    @DecimalMax(value = "800.0", message = "X coordinate must be <= 800")
+    private Double deliveryX;
 
-    @NotNull(message = "Delivery longitude is required")
-    private Double deliveryLongitude;
+    @NotNull(message = "Delivery Y coordinate is required")
+    @DecimalMin(value = "0.0", message = "Y coordinate must be >= 0")
+    @DecimalMax(value = "600.0", message = "Y coordinate must be <= 600")
+    private Double deliveryY;
 
     @NotNull(message = "Package weight is required")
     @DecimalMin(value = "0.1", message = "Minimum package weight is 0.1 kg")
@@ -36,20 +43,20 @@ public class CreateOrderRequest {
         this.customerName = customerName;
     }
 
-    public Double getDeliveryLatitude() {
-        return deliveryLatitude;
+    public Double getDeliveryX() {
+        return deliveryX;
     }
 
-    public void setDeliveryLatitude(Double deliveryLatitude) {
-        this.deliveryLatitude = deliveryLatitude;
+    public void setDeliveryX(Double deliveryX) {
+        this.deliveryX = deliveryX;
     }
 
-    public Double getDeliveryLongitude() {
-        return deliveryLongitude;
+    public Double getDeliveryY() {
+        return deliveryY;
     }
 
-    public void setDeliveryLongitude(Double deliveryLongitude) {
-        this.deliveryLongitude = deliveryLongitude;
+    public void setDeliveryY(Double deliveryY) {
+        this.deliveryY = deliveryY;
     }
 
     public Double getPackageWeightKg() {

@@ -6,6 +6,9 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+/**
+ * Base Station / Charging Hub on the 2D grid.
+ */
 @Entity
 @Table(name = "depots")
 public class Depot {
@@ -15,27 +18,25 @@ public class Depot {
     private Long id;
 
     private String name;
-    private double latitude;
-    private double longitude;
-    private double elevationMeters;
+    private double x;
+    private double y;
     private int chargingPadsTotal;
     private int chargingPadsOccupied;
 
     public Depot() {
     }
 
-    public Depot(Long id, String name, double latitude, double longitude, double elevationMeters, int chargingPadsTotal, int chargingPadsOccupied) {
+    public Depot(Long id, String name, double x, double y, int chargingPadsTotal, int chargingPadsOccupied) {
         this.id = id;
         this.name = name;
-        this.latitude = latitude;
-        this.longitude = longitude;
-        this.elevationMeters = elevationMeters;
+        this.x = x;
+        this.y = y;
         this.chargingPadsTotal = chargingPadsTotal;
         this.chargingPadsOccupied = chargingPadsOccupied;
     }
 
-    public GeoCoordinate toCoordinate() {
-        return new GeoCoordinate(latitude, longitude, elevationMeters);
+    public Location getLocation() {
+        return new Location(x, y);
     }
 
     public boolean hasAvailablePad() {
@@ -70,28 +71,20 @@ public class Depot {
         this.name = name;
     }
 
-    public double getLatitude() {
-        return latitude;
+    public double getX() {
+        return x;
     }
 
-    public void setLatitude(double latitude) {
-        this.latitude = latitude;
+    public void setX(double x) {
+        this.x = x;
     }
 
-    public double getLongitude() {
-        return longitude;
+    public double getY() {
+        return y;
     }
 
-    public void setLongitude(double longitude) {
-        this.longitude = longitude;
-    }
-
-    public double getElevationMeters() {
-        return elevationMeters;
-    }
-
-    public void setElevationMeters(double elevationMeters) {
-        this.elevationMeters = elevationMeters;
+    public void setY(double y) {
+        this.y = y;
     }
 
     public int getChargingPadsTotal() {

@@ -1,11 +1,15 @@
 package com.aerofleet.domain.model;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+/**
+ * Restricted Airspace / Hazard Zone on the 2D grid.
+ */
 @Entity
 @Table(name = "no_fly_zones")
 public class NoFlyZone {
@@ -15,69 +19,63 @@ public class NoFlyZone {
     private Long id;
 
     private String name;
-    private double centerLatitude;
-    private double centerLongitude;
-    private double radiusMeters;
-    private double minAltitudeMeters;
-    private double maxAltitudeMeters;
+
+    @Column(name = "center_x")
+    private double centerX;
+
+    @Column(name = "center_y")
+    private double centerY;
+
+    private double radius;
     private boolean active;
 
     public NoFlyZone() {
     }
 
-    public NoFlyZone(Long id, String name, double centerLatitude, double centerLongitude, double radiusMeters, double minAltitudeMeters, double maxAltitudeMeters, boolean active) {
+    public NoFlyZone(Long id, String name, double centerX, double centerY, double radius, boolean active) {
         this.id = id;
         this.name = name;
-        this.centerLatitude = centerLatitude;
-        this.centerLongitude = centerLongitude;
-        this.radiusMeters = radiusMeters;
-        this.minAltitudeMeters = minAltitudeMeters;
-        this.maxAltitudeMeters = maxAltitudeMeters;
+        this.centerX = centerX;
+        this.centerY = centerY;
+        this.radius = radius;
         this.active = active;
     }
 
-    public GeoCoordinate getCenterCoordinate() {
-        return new GeoCoordinate(centerLatitude, centerLongitude, (minAltitudeMeters + maxAltitudeMeters) / 2.0);
-    }
-
-    public boolean violatesZone(GeoCoordinate coord) {
-        if (!active || coord == null) return false;
-
-        // Check vertical profile
-        if (coord.getAltitudeMeters() < minAltitudeMeters || coord.getAltitudeMeters() > maxAltitudeMeters) {
-            return false;
-        }
-
-        // Check horizontal radial distance
-        double distance = getCenterCoordinate().distanceTo(coord);
-        return distance <= radiusMeters;
+    public Location getCenterLocation() {
+        return new Location(centerX, centerY);
     }
 
     /**
-     * Checks if line segment between p1 and p2 passes closer to center than radius.
+     * Checks if a 2D coordinate falls inside this circular zone:
+     * (x - cx)^2 + (y - cy)^2 <= radius^2
      */
-    public boolean intersectsPath(GeoCoordinate p1, GeoCoordinate p2) {
+    public boolean violatesZone(Location loc) {
+        if (!active || loc == null) return false;
+        double dist = getCenterLocation().distanceTo(loc);
+        return dist <= radius;
+    }
+
+    /**
+     * Checks if a line segment between p1 and p2 passes inside this circular zone.
+     */
+    public boolean intersectsPath(Location p1, Location p2) {
         if (!active || p1 == null || p2 == null) return false;
 
-        GeoCoordinate center = getCenterCoordinate();
+        Location center = getCenterLocation();
         double d1 = p1.distanceTo(center);
         double d2 = p2.distanceTo(center);
 
-        // If either endpoint is inside the zone
-        if (d1 <= radiusMeters || d2 <= radiusMeters) {
+        if (d1 <= radius || d2 <= radius) {
             return true;
         }
 
-        // Sampling points along the segment for robust circular boundary check
-        int steps = 15;
+        // Sample points along line segment
+        int steps = 12;
         for (int i = 1; i < steps; i++) {
             double fraction = (double) i / steps;
-            double sampleLat = p1.getLatitude() + (p2.getLatitude() - p1.getLatitude()) * fraction;
-            double sampleLon = p1.getLongitude() + (p2.getLongitude() - p1.getLongitude()) * fraction;
-            double sampleAlt = p1.getAltitudeMeters() + (p2.getAltitudeMeters() - p1.getAltitudeMeters()) * fraction;
-            GeoCoordinate samplePoint = new GeoCoordinate(sampleLat, sampleLon, sampleAlt);
-
-            if (violatesZone(samplePoint)) {
+            double sampleX = p1.getX() + (p2.getX() - p1.getX()) * fraction;
+            double sampleY = p1.getY() + (p2.getY() - p1.getY()) * fraction;
+            if (violatesZone(new Location(sampleX, sampleY))) {
                 return true;
             }
         }
@@ -100,44 +98,28 @@ public class NoFlyZone {
         this.name = name;
     }
 
-    public double getCenterLatitude() {
-        return centerLatitude;
+    public double getCenterX() {
+        return centerX;
     }
 
-    public void setCenterLatitude(double centerLatitude) {
-        this.centerLatitude = centerLatitude;
+    public void setCenterX(double centerX) {
+        this.centerX = centerX;
     }
 
-    public double getCenterLongitude() {
-        return centerLongitude;
+    public double getCenterY() {
+        return centerY;
     }
 
-    public void setCenterLongitude(double centerLongitude) {
-        this.centerLongitude = centerLongitude;
+    public void setCenterY(double centerY) {
+        this.centerY = centerY;
     }
 
-    public double getRadiusMeters() {
-        return radiusMeters;
+    public double getRadius() {
+        return radius;
     }
 
-    public void setRadiusMeters(double radiusMeters) {
-        this.radiusMeters = radiusMeters;
-    }
-
-    public double getMinAltitudeMeters() {
-        return minAltitudeMeters;
-    }
-
-    public void setMinAltitudeMeters(double minAltitudeMeters) {
-        this.minAltitudeMeters = minAltitudeMeters;
-    }
-
-    public double getMaxAltitudeMeters() {
-        return maxAltitudeMeters;
-    }
-
-    public void setMaxAltitudeMeters(double maxAltitudeMeters) {
-        this.maxAltitudeMeters = maxAltitudeMeters;
+    public void setRadius(double radius) {
+        this.radius = radius;
     }
 
     public boolean isActive() {

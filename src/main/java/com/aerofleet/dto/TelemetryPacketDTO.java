@@ -3,21 +3,23 @@ package com.aerofleet.dto;
 import com.aerofleet.domain.enums.DroneModelType;
 import com.aerofleet.domain.enums.DroneStatus;
 
+/**
+ * Real-time telemetry snapshot packet for a single drone.
+ */
 public class TelemetryPacketDTO {
     private Long droneId;
     private String callsign;
     private DroneModelType modelType;
-    private double latitude;
-    private double longitude;
-    private double altitudeMeters;
-    private double speedMps;
+    private double x;
+    private double y;
+    private double speed;
     private double headingDegrees;
     private double batteryPercent;
     private double payloadKg;
     private DroneStatus status;
     private Long assignedOrderId;
-    private Double targetLat;
-    private Double targetLon;
+    private Double targetX;
+    private Double targetY;
     private Long depotId;
     private int waypointIndex;
     private int totalWaypoints;
@@ -49,36 +51,28 @@ public class TelemetryPacketDTO {
         this.modelType = modelType;
     }
 
-    public double getLatitude() {
-        return latitude;
+    public double getX() {
+        return x;
     }
 
-    public void setLatitude(double latitude) {
-        this.latitude = latitude;
+    public void setX(double x) {
+        this.x = x;
     }
 
-    public double getLongitude() {
-        return longitude;
+    public double getY() {
+        return y;
     }
 
-    public void setLongitude(double longitude) {
-        this.longitude = longitude;
+    public void setY(double y) {
+        this.y = y;
     }
 
-    public double getAltitudeMeters() {
-        return altitudeMeters;
+    public double getSpeed() {
+        return speed;
     }
 
-    public void setAltitudeMeters(double altitudeMeters) {
-        this.altitudeMeters = altitudeMeters;
-    }
-
-    public double getSpeedMps() {
-        return speedMps;
-    }
-
-    public void setSpeedMps(double speedMps) {
-        this.speedMps = speedMps;
+    public void setSpeed(double speed) {
+        this.speed = speed;
     }
 
     public double getHeadingDegrees() {
@@ -121,20 +115,20 @@ public class TelemetryPacketDTO {
         this.assignedOrderId = assignedOrderId;
     }
 
-    public Double getTargetLat() {
-        return targetLat;
+    public Double getTargetX() {
+        return targetX;
     }
 
-    public void setTargetLat(Double targetLat) {
-        this.targetLat = targetLat;
+    public void setTargetX(Double targetX) {
+        this.targetX = targetX;
     }
 
-    public Double getTargetLon() {
-        return targetLon;
+    public Double getTargetY() {
+        return targetY;
     }
 
-    public void setTargetLon(Double targetLon) {
-        this.targetLon = targetLon;
+    public void setTargetY(Double targetY) {
+        this.targetY = targetY;
     }
 
     public Long getDepotId() {

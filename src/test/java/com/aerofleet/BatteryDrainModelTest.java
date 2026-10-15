@@ -22,28 +22,28 @@ public class BatteryDrainModelTest {
 
     @Test
     public void testBatteryDischargeUnderPayload() {
-        Drone drone = new Drone("TEST-01", DroneModelType.QUADCOPTER_STANDARD, 37.77, -122.41, 1L);
+        Drone drone = new Drone("TEST-01", DroneModelType.QUADCOPTER_STANDARD, 400.0, 300.0, 1L);
         drone.setStatus(DroneStatus.EN_ROUTE_DELIVERY);
         drone.setBatteryPercent(100.0);
         drone.setCurrentPayloadKg(0.0);
 
-        double emptyBattery = batteryDrainModel.updateBattery(drone, 60.0, 0.0);
+        double emptyBattery = batteryDrainModel.updateBattery(drone, 10.0);
 
         drone.setBatteryPercent(100.0);
         drone.setCurrentPayloadKg(3.0); // full payload
-        double fullPayloadBattery = batteryDrainModel.updateBattery(drone, 60.0, 0.0);
+        double fullPayloadBattery = batteryDrainModel.updateBattery(drone, 10.0);
 
-        assertTrue(emptyBattery < 100.0, "Drone should consume battery during flight");
-        assertTrue(fullPayloadBattery < emptyBattery, "Loaded drone should drain battery faster than empty drone");
+        assertTrue(emptyBattery < 100.0, "Drone should drain battery while flying");
+        assertTrue(fullPayloadBattery < emptyBattery, "Loaded drone must drain battery faster than empty drone");
     }
 
     @Test
     public void testBatteryChargingAtDepot() {
-        Drone drone = new Drone("TEST-01", DroneModelType.QUADCOPTER_STANDARD, 37.77, -122.41, 1L);
+        Drone drone = new Drone("TEST-01", DroneModelType.QUADCOPTER_STANDARD, 400.0, 300.0, 1L);
         drone.setStatus(DroneStatus.CHARGING);
         drone.setBatteryPercent(50.0);
 
-        double charged = batteryDrainModel.updateBattery(drone, 10.0, 0.0);
+        double charged = batteryDrainModel.updateBattery(drone, 10.0);
         // 3.0% per sec * 10s = 30% added => 80.0%
         assertEquals(80.0, charged, 0.1, "Battery should recharge at 3% per sec");
     }

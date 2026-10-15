@@ -4,7 +4,7 @@ import com.aerofleet.domain.enums.DroneStatus;
 import com.aerofleet.domain.model.DeliveryOrder;
 import com.aerofleet.domain.model.Depot;
 import com.aerofleet.domain.model.Drone;
-import com.aerofleet.domain.model.GeoCoordinate;
+import com.aerofleet.domain.model.Location;
 import com.aerofleet.domain.model.NoFlyZone;
 import com.aerofleet.domain.model.Waypoint;
 import org.springframework.stereotype.Service;
@@ -12,6 +12,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Generates simple 2D waypoint routes for drone delivery missions.
+ */
 @Service
 public class RoutingService {
 
@@ -22,71 +25,50 @@ public class RoutingService {
     }
 
     /**
-     * Builds a full mission flight plan from Depot to Customer Delivery Point and return.
+     * Builds a flight route on the 2D grid: Depot -> Customer -> Depot
      */
     public List<Waypoint> buildDeliveryRoute(Drone drone, Depot depot, DeliveryOrder order) {
         List<Waypoint> route = new ArrayList<>();
-        double cruiseAlt = drone.getModelType().getCruiseAltitudeMeters();
-        double maxSpeed = drone.getModelType().getMaxSpeedMps();
+        double cruiseSpeed = drone.getModelType().getMaxSpeedMps();
 
-        GeoCoordinate depotGround = depot.toCoordinate();
-        GeoCoordinate depotAir = new GeoCoordinate(depot.getLatitude(), depot.getLongitude(), cruiseAlt);
+        Location depotLoc = depot.getLocation();
+        Location dropLoc = order.getDeliveryLocation();
 
-        GeoCoordinate dropGround = order.getDeliveryCoordinate();
-        GeoCoordinate dropAir = new GeoCoordinate(dropGround.getLatitude(), dropGround.getLongitude(), cruiseAlt);
-        GeoCoordinate dropHover = new GeoCoordinate(dropGround.getLatitude(), dropGround.getLongitude(), 3.0);
-
-        // 1. TAKEOFF: Vertical climb to cruise altitude
-        route.add(new Waypoint(depotAir, maxSpeed * 0.4, DroneStatus.TAKING_OFF, "Ascending to cruise altitude"));
-
-        // 2. EN_ROUTE_DELIVERY: Cruise to drop coordinates (handling NFZ avoidance)
-        Optional<NoFlyZone> outboundObstacle = geofenceService.getIntersectedZone(depotAir, dropAir);
+        // 1. Outbound route to Customer (checking for No-Fly Zone obstacle)
+        Optional<NoFlyZone> outboundObstacle = geofenceService.getIntersectedZone(depotLoc, dropLoc);
         if (outboundObstacle.isPresent()) {
-            GeoCoordinate bypass = geofenceService.calculateBypassWaypoint(depotAir, dropAir, outboundObstacle.get());
-            route.add(new Waypoint(bypass, maxSpeed * 0.9, DroneStatus.EN_ROUTE_DELIVERY, "Airspace detour around " + outboundObstacle.get().getName()));
+            Location bypass = geofenceService.calculateBypassWaypoint(depotLoc, dropLoc, outboundObstacle.get());
+            route.add(new Waypoint(bypass, cruiseSpeed * 0.9, DroneStatus.EN_ROUTE_DELIVERY, "Detour around " + outboundObstacle.get().getName()));
         }
-        route.add(new Waypoint(dropAir, maxSpeed, DroneStatus.EN_ROUTE_DELIVERY, "Cruising to delivery coordinates"));
+        route.add(new Waypoint(dropLoc, cruiseSpeed, DroneStatus.EN_ROUTE_DELIVERY, "Cruising to customer destination"));
 
-        // 3. DESCENDING: Descent to drop height
-        route.add(new Waypoint(dropHover, maxSpeed * 0.3, DroneStatus.DESCENDING_DELIVERY, "Descending for package delivery"));
+        // 2. Deliver package at destination
+        route.add(new Waypoint(dropLoc, 0.0, DroneStatus.DELIVERING, "Releasing payload to customer"));
 
-        // 4. DELIVERING: Hover point for package release
-        route.add(new Waypoint(dropHover, 0.0, DroneStatus.DELIVERING, "Releasing payload to customer"));
-
-        // 5. ASCENDING: Climb back to cruise altitude
-        route.add(new Waypoint(dropAir, maxSpeed * 0.4, DroneStatus.ASCENDING_DELIVERY, "Ascending to cruise altitude"));
-
-        // 6. RETURNING: Cruise back to depot
-        Optional<NoFlyZone> returnObstacle = geofenceService.getIntersectedZone(dropAir, depotAir);
+        // 3. Return leg back to depot
+        Optional<NoFlyZone> returnObstacle = geofenceService.getIntersectedZone(dropLoc, depotLoc);
         if (returnObstacle.isPresent()) {
-            GeoCoordinate bypass = geofenceService.calculateBypassWaypoint(dropAir, depotAir, returnObstacle.get());
-            route.add(new Waypoint(bypass, maxSpeed * 0.9, DroneStatus.RETURNING, "Return detour around " + returnObstacle.get().getName()));
+            Location bypass = geofenceService.calculateBypassWaypoint(dropLoc, depotLoc, returnObstacle.get());
+            route.add(new Waypoint(bypass, cruiseSpeed * 0.9, DroneStatus.RETURNING, "Return detour around " + returnObstacle.get().getName()));
         }
-        route.add(new Waypoint(depotAir, maxSpeed, DroneStatus.RETURNING, "Returning to depot air corridor"));
+        route.add(new Waypoint(depotLoc, cruiseSpeed, DroneStatus.RETURNING, "Returning to charging depot"));
 
-        // 7. LANDING: Vertical touchdown onto depot pad
-        route.add(new Waypoint(depotGround, maxSpeed * 0.3, DroneStatus.LANDING, "Landing onto charging pad"));
+        // 4. Landing at Depot
+        route.add(new Waypoint(depotLoc, cruiseSpeed * 0.4, DroneStatus.LANDING, "Landing onto charging pad"));
 
         return route;
     }
 
     /**
-     * Generates an emergency Return-To-Home flight plan back to the safe depot.
+     * Emergency Return-To-Home (RTH) route directly to nearest depot.
      */
     public List<Waypoint> buildEmergencyRthRoute(Drone drone, Depot depot) {
         List<Waypoint> route = new ArrayList<>();
-        double cruiseAlt = Math.max(drone.getCurrentAltitudeMeters(), drone.getModelType().getCruiseAltitudeMeters());
         double speed = drone.getModelType().getMaxSpeedMps() * 0.8;
+        Location depotLoc = depot.getLocation();
 
-        GeoCoordinate currentCoord = drone.getCurrentCoordinate();
-        GeoCoordinate depotAir = new GeoCoordinate(depot.getLatitude(), depot.getLongitude(), cruiseAlt);
-        GeoCoordinate depotGround = depot.toCoordinate();
-
-        // 1. Immediate vector to depot airspace
-        route.add(new Waypoint(depotAir, speed, DroneStatus.EMERGENCY_RTH, "Emergency Return-To-Home initiated"));
-
-        // 2. Direct emergency landing
-        route.add(new Waypoint(depotGround, speed * 0.3, DroneStatus.LANDING, "Emergency touchdown on depot pad"));
+        route.add(new Waypoint(depotLoc, speed, DroneStatus.EMERGENCY_RTH, "Emergency Return-To-Home initiated"));
+        route.add(new Waypoint(depotLoc, speed * 0.3, DroneStatus.LANDING, "Emergency touchdown on depot pad"));
 
         return route;
     }
