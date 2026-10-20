@@ -1,52 +1,67 @@
 # AeroFleet 🚁⚡
-### Autonomous Delivery Drone Fleet Simulation Platform
-
-AeroFleet is an event-driven delivery drone simulation platform built with **Java Spring Boot**. It simulates autonomous drone operations across urban and suburban environments, handling dynamic package dispatching, realistic flight kinematics, battery discharge under payload and weather drag, geofenced No-Fly Zone (NFZ) avoidance, failsafe Return-To-Home (RTH) procedures, and real-time telemetry streaming over WebSockets to an interactive browser dashboard.
+### Autonomous 2D Drone Delivery Fleet Simulation Platform
+*A clean, educational, and viva-ready autonomous drone fleet simulator engineered for College Computer Science Miniprojects.*
 
 ---
 
-## 🌟 Key Features
+## 📖 Master Documentation Index
 
-1. **Simulation & Flight Kinematics Engine**:
-   - Multi-phase 3D flight profiles: `TAKEOFF` $\to$ `EN_ROUTE_DELIVERY` $\to$ `DESCENDING_DELIVERY` $\to$ `DELIVERING` $\to$ `ASCENDING_DELIVERY` $\to$ `RETURNING` $\to$ `LANDING` $\to$ `CHARGING`.
-   - Spherical distance and bearing math using the Haversine formula and waypoint progression.
-   - Dynamic time-warp multiplier (1x, 2x, 5x, 10x) and simulation pause/resume.
+| Document | Description |
+|---|---|
+| 📑 **[API Documentation](docs/API_DOCUMENTATION.md)** | Full REST endpoints, request/response schemas, and WebSocket (STOMP) telemetry topics. |
+| 📐 **[Design Documentation](docs/DESIGN_DOCUMENTATION.md)** | System architecture, Cartesian physics, kinematics math, battery drain models, and state machines. |
+| 💻 **[Code-Level Documentation](docs/CODE_LEVEL_DOCUMENTATION.md)** | Package breakdown, class & method taxonomy, OOP patterns used, and Top 5 Viva Defense Q&As. |
 
-2. **Energy & Battery Consumption Model**:
-   - Dynamic power draw factoring avionics baseline, payload mass ratio ($W_{\text{payload}} / W_{\text{max}}$), vertical climb penalty, and environmental drag.
-   - Automatic battery charging on depot pads at 3%/sec until full.
-   - Low-battery failsafe Return-To-Home (RTH) triggering immediate diversion to the nearest depot.
+---
 
-3. **Geofencing & Airspace Protection**:
-   - 3D No-Fly Zones (NFZs) around sensitive sites (hospitals, heliports, government facilities).
-   - Real-time path intersection detection and automated detour waypoint deflection.
+## 🌟 Project Overview
 
-4. **Intelligent Dispatch Engine**:
-   - Evaluates pending orders and pairs them with optimal drones based on payload capacity, proximity, battery state-of-charge, and range reachability.
+**AeroFleet** simulates autonomous drone operations across an $800 \times 600$ 2D Cartesian grid. It demonstrates clean object-oriented architecture and fundamental physics modeling without requiring external, heavyweight GIS dependencies or internet mapping APIs.
 
-5. **Real-Time Telemetry & Modern Web Dashboard**:
-   - High-frequency STOMP over WebSocket streaming to a single-page Leaflet.js radar map.
-   - Live drone cards with battery gauges, altitude, speed, payload indicators, manual recall, and fault injection buttons.
-   - One-click batch delivery generator and interactive map click-to-dispatch.
+### Key Capabilities:
+1. **Kinematics & Vector Flight Engine**:
+   - Discrete 1 Hz tick loop with multi-phase missions: `IDLE` $\to$ `CHARGING` $\to$ `EN_ROUTE_DELIVERY` $\to$ `DELIVERING` $\to$ `RETURNING` $\to$ `LANDING`.
+   - Trigonometric heading ($\text{atan2}$) and step translations.
+   - Dynamic simulation speed control ($0.2\times$ to $20\times$) and pause/resume.
+2. **Dynamic Airspace Management (No-Fly Zones)**:
+   - Operators can dynamically add, delete, or toggle circular restricted hazard zones.
+   - **Exact Euclidean point-to-segment geometry**: Eliminates false negatives and detects path incursions in $O(1)$ time.
+   - **In-flight replanning**: Active drones immediately curve around newly placed or activated zones.
+   - **Recursive detour routing**: Routes safely around multiple overlapping obstacles.
+3. **Depot Auto-Dock Charging**:
+   - Drones stationary at ground base stations with $< 100\%$ battery automatically dock and recharge at $3.0\%/\text{sec}$ until full.
+4. **Atmospheric Weather & Wind Modeling**:
+   - Interactive weather presets (`CLEAR`, `WINDY`, `RAIN`, `STORM`), variable wind speed ($0$–$25\text{ m/s}$), and $360^\circ$ directional compass heading.
+   - Tailwind assists forward ground speed; headwind introduces aerodynamic resistance.
+   - Battery consumption scales dynamically with atmospheric drag.
+5. **Intelligent Dispatch Engine**:
+   - Cost-function optimization pairs pending delivery orders with the closest available drone capable of carrying the payload with sufficient battery buffer.
+6. **Real-Time Telemetry & Radar Canvas**:
+   - High-performance HTML5 Canvas radar rendering at 60 FPS with linear interpolation (LERP) and animated quadcopter rotors.
+   - Full planned flight corridor polylines displaying real-time detour bends around hazard zones.
+   - Instant notifications over WebSockets (STOMP).
 
 ---
 
 ## 🛠️ Technology Stack
 
-- **Backend**: Spring Boot 3.3.5, Spring Data JPA, Spring WebSocket (STOMP/SockJS), Jakarta Validation
-- **Database**: H2 In-Memory Database (with preloaded depots, drones, and airspace zones)
-- **Frontend**: Single-Page Application (HTML5, Tailwind CSS, Leaflet.js, Lucide Icons, SockJS, StompJS)
-- **Build & Runtime**: Maven Wrapper (`mvnw`), Java 17 / 21+
+- **Backend**: Java 17 / 21+, Spring Boot 3.3.5, Spring Data JPA, Spring WebSocket (STOMP / SockJS), Jakarta Validation
+- **Database**: H2 In-Memory Database (`jdbc:h2:mem:aerofleetdb`)
+- **Frontend**: HTML5 Canvas, Tailwind CSS, Lucide Icons, SockJS, StompJS
+- **Build System**: Maven Wrapper (`mvnw.cmd` / `mvnw`)
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start Guide
 
-### 1. Build and Run the Application
+### Prerequisites
+- **Java**: JDK 17, 21, or 24 installed
+- **Terminal**: Windows PowerShell, Command Prompt, or Linux/macOS Bash
 
-Using the bundled Maven wrapper:
+### 1. Build and Run the Platform
+From the project root (`e:\AeroFleet`):
 
-```bash
+```powershell
 # Windows
 .\mvnw.cmd spring-boot:run
 
@@ -54,44 +69,90 @@ Using the bundled Maven wrapper:
 ./mvnw spring-boot:run
 ```
 
-Alternatively with system Maven:
-```bash
-mvn spring-boot:run
-```
-
-### 2. Open the Live Mission Control Center
-
+### 2. Open the Mission Control Center
 Open your browser and navigate to:
 ```
 http://localhost:8080
 ```
 
-- **H2 Database Console**: `http://localhost:8080/h2-console` (JDBC URL: `jdbc:h2:mem:aerofleetdb`, User: `sa`, Password: empty)
+- **Live Mission Control Dashboard**: `http://localhost:8080`
+- **H2 In-Memory Database Console**: `http://localhost:8080/h2-console`
+  - **JDBC URL**: `jdbc:h2:mem:aerofleetdb`
+  - **User**: `sa`
+  - **Password**: *(leave empty)*
 
 ---
 
-## 📡 REST API Reference
+## 🧪 Running Automated Unit Tests
+
+Execute the complete test suite verifying kinematics, exact geometry projection, battery drain/charging, and Spring Boot context:
+
+```powershell
+# Windows
+.\mvnw.cmd test
+
+# Linux / macOS
+./mvnw test
+```
+
+### Test Coverage Highlights:
+- `NoFlyZoneTest`: Validates exact line-circle projection, small-radius detection, and inactive zone bypass.
+- `BatteryDrainModelTest`: Validates discharge under payload, weather drag, and depot charging capping at 100%.
+- `KinematicsTest`: Validates Euclidean distance, bearing degrees, and vector stepping.
+- `AeroFleetApplicationTests`: Verifies full application context bootstrap and database seeding.
+
+---
+
+## 📡 REST API Summary
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/v1/drones` | List all drones with current telemetry and status |
+| `GET` | `/api/v1/drones` | List all drones with live coordinates and battery |
 | `GET` | `/api/v1/drones/{id}` | Get specific drone details |
-| `POST` | `/api/v1/drones/{id}/recall` | Trigger manual emergency Return-To-Home |
+| `POST` | `/api/v1/drones/{id}/recall` | Trigger emergency Return-To-Home to nearest hub |
 | `GET` | `/api/v1/orders` | List delivery orders (optional `?status=PENDING`) |
 | `POST` | `/api/v1/orders` | Create a new delivery order |
-| `POST` | `/api/v1/orders/simulate-batch` | Generate $N$ randomized delivery missions |
-| `GET` | `/api/v1/depots` | List all base stations and charging pads |
-| `GET` | `/api/v1/geofence` | List active No-Fly Zones (NFZs) |
-| `GET` | `/api/v1/simulation/status` | Current clock, speed multiplier, and weather |
-| `POST` | `/api/v1/simulation/control` | Control pause/play, speed (1x-10x), and weather |
-| `POST` | `/api/v1/simulation/incident` | Inject fault (e.g. `BATTERY_DRAIN`, `MOTOR_FAULT`) |
+| `POST` | `/api/v1/orders/simulate-batch` | Generate randomized test delivery missions |
+| `GET` | `/api/v1/depots` | List all base stations and charging pad occupancies |
+| `GET` | `/api/v1/geofence` | List all active/inactive No-Fly Zones |
+| `POST` | `/api/v1/geofence` | Establish a new circular restricted zone |
+| `PUT` | `/api/v1/geofence/{id}/toggle` | Toggle zone active/inactive state |
+| `DELETE` | `/api/v1/geofence/{id}` | Remove a single restricted zone |
+| `DELETE` | `/api/v1/geofence` | Clear all restricted zones |
+| `GET` | `/api/v1/simulation/status` | Read simulation clock, speed multiplier, and weather |
+| `POST` | `/api/v1/simulation/control` | Control pause/play, speed (0.2x-20x), and atmosphere |
+| `POST` | `/api/v1/simulation/incident` | Inject fault (`BATTERY_DRAIN`, `MOTOR_FAULT`) |
+
+*For complete request/response schemas and curl examples, see **[API Documentation](docs/API_DOCUMENTATION.md)**.*
 
 ---
 
-## 🧪 Running Automated Tests
+## 🎓 Academic Viva & Presentation Highlights
 
-Run the test suite verifying kinematics, battery model, geofencing, and Spring context:
+When demonstrating this project to professors and external examiners:
+1. **Pure Cartesian Geometry**: Emphasize that all spatial mechanics (distance, heading, collision detection, and detour waypoints) are implemented from mathematical first principles on an $800 \times 600$ grid.
+2. **Exact Point-to-Segment Projection**: Explain the dot-product scalar projection ($t = \text{clamp}(\dots)$) used in `NoFlyZone.java` for $O(1)$ collision checks that never miss narrow zones.
+3. **Dynamic In-Flight Replanning**: Demonstrate establishing a No-Fly Zone in front of an active drone and showing the planned flight polyline dynamically bend around the obstacle in real time.
+4. **Auto-Dock Charging**: Demonstrate clicking "Drain 30%" on an idle depot drone, watching it transition to `CHARGING`, and observing it smoothly recover to 100%.
 
-```bash
-.\mvnw.cmd test
+---
+
+## 📁 Project Structure
+
+```
+AeroFleet/
+├── docs/
+│   ├── API_DOCUMENTATION.md          # Complete REST & WebSocket reference
+│   ├── DESIGN_DOCUMENTATION.md       # Architecture, math models & state diagrams
+│   └── CODE_LEVEL_DOCUMENTATION.md   # Class taxonomy, OOP patterns & Viva Q&A
+├── src/
+│   ├── main/
+│   │   ├── java/com/aerofleet/       # Spring Boot source code
+│   │   └── resources/
+│   │       ├── application.yml       # Simulation configuration
+│   │       ├── data.sql              # Seed hubs, drones, zones, and orders
+│   │       └── static/               # Frontend HTML5, CSS & JS radar
+│   └── test/java/com/aerofleet/      # Automated unit test suite
+├── pom.xml                           # Maven dependencies & build definition
+└── README.md                         # Master entry point
 ```
